@@ -27,6 +27,60 @@ fi
 WIFI_CHANNEL="${WIFI_CHANNEL:-auto}"
 WIFI_FREQ_BAND="${WIFI_FREQ_BAND:-2.4}"
 
+interface_phy() {
+  iw dev "${WIFI_INTERFACE}" info 2>/dev/null | awk '/wiphy/{print $2}'
+}
+
+banda_suportada() {
+  local banda="$1"
+  local phy
+  local info
+
+  phy="$(interface_phy)"
+  [[ -n "${phy}" ]] || return 1
+
+  info="$(iw "phy${phy}" info 2>/dev/null || true)"
+  [[ -n "${info}" ]] || return 1
+
+  if [[ "${banda}" == "5" ]]; then
+    grep -Eq '\* 5[0-9]{3}(\.[0-9])? MHz' <<< "${info}"
+  else
+    grep -Eq '\* 24[0-9]{2}(\.[0-9])? MHz' <<< "${info}"
+  fi
+}
+
+resolver_banda_wifi() {
+  if [[ "${WIFI_FREQ_BAND}" != "auto" ]]; then
+    if [[ "${WIFI_FREQ_BAND}" != "2.4" && "${WIFI_FREQ_BAND}" != "5" ]]; then
+      log "ERRO: WIFI_FREQ_BAND deve ser 2.4, 5 ou auto."
+      exit 1
+    fi
+    return
+  fi
+
+  if [[ "${WIFI_CHANNEL}" =~ ^[0-9]+$ ]]; then
+    if (( WIFI_CHANNEL >= 1 && WIFI_CHANNEL <= 14 )); then
+      WIFI_FREQ_BAND="2.4"
+    else
+      WIFI_FREQ_BAND="5"
+    fi
+    log "Banda Wi-Fi inferida a partir do canal ${WIFI_CHANNEL}: ${WIFI_FREQ_BAND}GHz."
+    return
+  fi
+
+  ip link set "${WIFI_INTERFACE}" up >/dev/null 2>&1 || true
+
+  if banda_suportada "5"; then
+    WIFI_FREQ_BAND="5"
+  elif banda_suportada "2.4"; then
+    WIFI_FREQ_BAND="2.4"
+  else
+    WIFI_FREQ_BAND="2.4"
+    log "AVISO: nao foi possivel detectar as bandas suportadas por ${WIFI_INTERFACE}; usando 2.4GHz."
+  fi
+  log "Banda Wi-Fi automatica escolhida: ${WIFI_FREQ_BAND}GHz."
+}
+
 freq_para_canal() {
   local freq="$1"
 
@@ -164,6 +218,7 @@ if ! grep -q -- '--dhcp-dns' <<< "${CREATE_AP_HELP}"; then
   exit 1
 fi
 
+resolver_banda_wifi
 selecionar_canal_wifi
 
 log "Preparando hotspot '${WIFI_SSID}' em ${WIFI_INTERFACE}, internet via ${INTERNET_INTERFACE}."
