@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"log"
 	"net"
@@ -29,11 +28,13 @@ const (
 var upstreamServers = []string{"8.8.8.8:53", "1.1.1.1:53"}
 
 type dnsConfig struct {
-	tlds           map[string]bool
-	dockerGateway  string
-	hotspotGateway string
-	db             *sql.DB
-	cache          *redis.Client
+	tlds            map[string]bool
+	discoverDomains map[string]bool
+	discoverIP      net.IP
+	dockerGateway   string
+	hotspotGateway  string
+	db              *sql.DB
+	cache           *redis.Client
 }
 
 // newHandler devolve o handler dns.HandlerFunc para uma view especifica -
@@ -49,7 +50,8 @@ func newHandler(cfg *dnsConfig, v view) dns.HandlerFunc {
 		question := r.Question[0]
 		name := strings.ToLower(question.Name)
 
-		if !matchesLocalTLD(name, cfg.tlds) {
+		zone, kind := zoneFor(name, cfg)
+		if kind == zoneNone {
 			forward(w, r)
 			return
 		}
@@ -60,7 +62,7 @@ func newHandler(cfg *dnsConfig, v view) dns.HandlerFunc {
 
 		switch question.Qtype {
 		case dns.TypeA:
-			ip, err := answerIPFor(cfg, v, name)
+			ip, err := answerIPFor(cfg, v, kind, name)
 			if err != nil {
 				log.Printf("[dns-provider] erro ao resolver %s: %v", name, err)
 				msg.Rcode = dns.RcodeServerFailure
@@ -72,7 +74,6 @@ func newHandler(cfg *dnsConfig, v view) dns.HandlerFunc {
 				A:   ip,
 			})
 		case dns.TypeSOA:
-			zone := zoneFor(name, cfg.tlds)
 			msg.Answer = append(msg.Answer, &dns.SOA{
 				Hdr:     dns.RR_Header{Name: dns.Fqdn(zone), Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 3600},
 				Ns:      "ns." + dns.Fqdn(zone),
@@ -92,61 +93,6 @@ func newHandler(cfg *dnsConfig, v view) dns.HandlerFunc {
 
 		_ = w.WriteMsg(msg)
 	}
-}
-
-// answerIPFor resolve o IP de resposta conforme a view: container/hotspot
-// sao sempre o mesmo IP fixo (o proprio gateway); host aloca/busca um IP
-// de loopback persistente e unico por hostname (Redis primeiro, Postgres
-// no cache miss).
-func answerIPFor(cfg *dnsConfig, v view, name string) (net.IP, error) {
-	switch v {
-	case viewContainer:
-		return net.ParseIP(cfg.dockerGateway), nil
-	case viewHotspot:
-		return net.ParseIP(cfg.hotspotGateway), nil
-	default:
-		return loopbackIPFor(cfg, name)
-	}
-}
-
-func loopbackIPFor(cfg *dnsConfig, name string) (net.IP, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	if offset, ok := cachedOffset(ctx, cfg.cache, name); ok {
-		return offsetToLoopback(offset), nil
-	}
-
-	offset, err := getOrAllocateOffset(ctx, cfg.db, name)
-	if err != nil {
-		return nil, err
-	}
-	storeOffset(ctx, cfg.cache, name, offset)
-	return offsetToLoopback(offset), nil
-}
-
-// offsetToLoopback converte um offset (sequence do Postgres, comeca em 2)
-// num IP dentro de 127.0.0.0/8 - os 24 bits menos significativos do
-// offset viram os tres ultimos octetos do IP.
-func offsetToLoopback(offset int64) net.IP {
-	b := uint32(offset) & 0xFFFFFF
-	return net.IPv4(127, byte(b>>16), byte(b>>8), byte(b))
-}
-
-func matchesLocalTLD(fqdn string, tlds map[string]bool) bool {
-	labels := dns.SplitDomainName(fqdn)
-	if len(labels) == 0 {
-		return false
-	}
-	return tlds[labels[len(labels)-1]]
-}
-
-func zoneFor(fqdn string, tlds map[string]bool) string {
-	labels := dns.SplitDomainName(fqdn)
-	if len(labels) == 0 {
-		return fqdn
-	}
-	return labels[len(labels)-1] + "."
 }
 
 // forward encaminha qualquer consulta fora dos TLDs locais para os

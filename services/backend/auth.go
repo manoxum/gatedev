@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	sessionCookieName = "central_session"
+	sessionCookieName = "bindnet_session"
 	sessionDuration   = 12 * time.Hour
 )
 

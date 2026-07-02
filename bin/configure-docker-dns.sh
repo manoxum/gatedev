@@ -2,7 +2,7 @@
 set -euo pipefail
 
 log() {
-  printf '[central-docker-dns] %s\n' "$*"
+  printf '[bindnet-docker-dns] %s\n' "$*"
 }
 
 docker_dns="${DOCKER_HOST_GATEWAY:-10.90.0.1}"

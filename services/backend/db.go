@@ -15,11 +15,11 @@ import (
 func openPostgres() (*sql.DB, error) {
 	dsn := fmt.Sprintf(
 		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		getenv("POSTGRES_USER", "central"),
+		getenv("POSTGRES_USER", "bindnet"),
 		getenv("POSTGRES_PASSWORD", ""),
 		getenv("POSTGRES_HOST", "postgres"),
 		getenv("POSTGRES_PORT", "5432"),
-		getenv("POSTGRES_DB", "central"),
+		getenv("POSTGRES_DB", "bindnet"),
 	)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {

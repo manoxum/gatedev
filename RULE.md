@@ -1,12 +1,12 @@
-# Regras de negócio — central
+# Regras de negócio — bindnet
 
 Este documento descreve o comportamento funcional esperado de cada
-serviço do stack `central`. É a referência de "o que o sistema deve
+serviço do stack `bindnet`. É a referência de "o que o sistema deve
 fazer"; para "como rodar" veja o [README.md](README.md).
 
 ## Visão geral do domínio
 
-O `central` provê, para uma rede local doméstica/pequeno escritório:
+O `bindnet` provê, para uma rede local doméstica/pequeno escritório:
 
 1. Um ponto de acesso Wi-Fi (hotspot) compartilhando a internet de uma
    interface cabeada/outra Wi-Fi.
@@ -116,7 +116,7 @@ scripts tinham, só que dentro do container privilegiado em vez de
 - `POST /api/hotspot/start`:
   1. Marca `WIFI_INTERFACE` (e `ap0`) como **não gerenciada** pelo
      NetworkManager, via drop-in em
-     `/etc/NetworkManager/conf.d/90-central-hotspot-unmanaged.conf`
+     `/etc/NetworkManager/conf.d/90-bindnet-hotspot-unmanaged.conf`
      (`worker`: `POST /network/wifi-unmanage`), para o `hostapd`
      (dentro do `create_ap`) poder assumir a placa.
   2. Sobe `hotspot` + `dns-provider` via `docker compose up -d
@@ -152,6 +152,15 @@ Regras:
   `local,test,example`). Cada TLD é validado (`[a-z0-9-]`, sem começar
   ou terminar com `-`); TLD inválido é erro fatal. Duplicatas são
   ignoradas silenciosamente.
+- `DOMAINS` define os TLDs do **discover mode** (ex.: `discover`).
+  Para esses TLDs, qualquer consulta `A` (ex.: `painel.discover`,
+  `qualquer-nome.discover`) responde com o IP LAN desta instância,
+  igual em todas as views. O IP vem de `HOST_SOURCE_CIDR` sem o CIDR
+  (ex.: `10.234.2.102/32` → `10.234.2.102`); se
+  `HOST_SOURCE_CIDR` estiver vazio, o dns-provider detecta o IP pela
+  rota padrão de saída. `DOMAINS` vazio desliga o discover mode. Use
+  TLDs diferentes dos de `DNS_LOCAL_TLDS`, porque discover tem
+  precedência quando houver sobreposição.
 - **Split-horizon por três "views", uma por IP de bind** — o processo
   abre um socket UDP:53 separado para cada IP abaixo; como cada view é
   um socket próprio, o dns-provider sabe de onde a consulta veio só
@@ -185,14 +194,12 @@ Regras:
     quebrada, mesmo a resposta `A` estando correta.
 - Para qualquer outro domínio (em qualquer view), a consulta é
   encaminhada para DNS público (`8.8.8.8`, `1.1.1.1`).
-- Antes de abrir os sockets, o processo **espera** (até
-  `COREDNS_WAIT_TIMEOUT`, padrão 90s) os IPs obrigatórios
-  (`DOCKER_HOST_GATEWAY`, `HOTSPOT_GATEWAY`; `127.0.0.1` sempre existe)
-  existirem na máquina — existe porque `dns-provider` depende do
-  `hotspot` ter criado a interface/gateway antes; se o timeout
-  estourar, o container falha com uma mensagem explicando a causa
-  provável (hotspot não subiu, ou `DOCKER_HOST_GATEWAY`/`HOTSPOT_GATEWAY`
-  incorretos).
+- Antes de abrir os sockets principais, o processo **espera** (até
+  `COREDNS_WAIT_TIMEOUT`, padrão 90s) `127.0.0.1` e
+  `DOCKER_HOST_GATEWAY` existirem na máquina. O socket de
+  `HOTSPOT_GATEWAY` é tratado em loop separado: se o hotspot ainda não
+  criou o IP, o dns-provider continua vivo e tenta abrir esse listener
+  novamente a cada poucos segundos.
 - `dns-provider` roda com `network_mode: host` (precisa bindar IPs
   reais do host) e por isso **não enxerga a DNS interna do Docker**
   para resolver `postgres`/`redis` pelo nome do serviço — fala com
@@ -227,7 +234,7 @@ Regras:
      confiança já estabelecida nos dispositivos que já importaram essa
      CA quando o stack ainda usava `cert-proxy`.
   3. Senão → gera uma CA nova (`source='generated'`): RSA 4096, válida 10
-     anos, CN de `CA_COMMON_NAME` (padrão "Central Local Development
+     anos, CN de `CA_COMMON_NAME` (padrão "Bindnet Local Development
      CA"). Mesmos parâmetros criptográficos do antigo `cert-proxy`.
 - `POST /api/certificates` emite um certificado *leaf* (RSA 2048,
   válido 2 anos) para o domínio informado, sempre como uma linha nova
@@ -311,14 +318,14 @@ Regras:
   (`/var/run/docker.sock`, `/run/dbus`, `/etc/NetworkManager/conf.d`,
   `network_mode: host`). Sua API interna (servida só via socket Unix
   em `worker_ipc`, sem porta TCP) opera com uma lista fechada de
-  containers permitidos (`central-hotspot`, `central-dns-provider`,
-  `central-nginx-ui`, `central-postgres`, `central-mongo`,
-  `central-minio`) e ações específicas — nunca executa comando
+  serviços permitidos (`hotspot`, `dns-provider`, `nginx-ui`,
+  `postgres`, `mongo`, `minio`) e ações específicas via
+  `docker compose --project-name bindnet` — nunca executa comando
   arbitrário vindo do backend. O `worker` não depende de `hotspot` nem
   `dns-provider` no Compose, para que o painel suba sem acionar a rede
   física; esses serviços só sobem quando o usuário aplica/inicia o
-  hotspot pelo painel. `central-migration` (job one-shot) propositalmente
-  não está nessa lista.
+  hotspot pelo painel. `migration` (job one-shot) propositalmente não
+  está nessa lista.
 - Editar `.env` a partir do painel (`GET/PATCH /env` no worker) é
   restrito por "seção": a seção `hotspot` só pode tocar
   `WIFI_*`/`HOTSPOT_GATEWAY`/`HOTSPOT_CIDR`; a seção `dns` só pode

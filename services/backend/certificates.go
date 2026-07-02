@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	// legacyCertProxyPath e o volume central_cert_proxy_data, montado
+	// legacyCertProxyPath e o volume cert_proxy_data, montado
 	// somente leitura - usado uma unica vez por loadOrImportCA para
 	// trazer a CA existente do antigo cert-proxy para o Postgres. Nunca
 	// escrito pelo backend.
@@ -81,7 +81,7 @@ func loadOrImportCA(db *sql.DB) (*localCA, error) {
 			return nil, err
 		}
 		ca.Key = key
-		log.Println("[backend] CA local legada (central_cert_proxy_data) importada para o Postgres - dispositivos ja confiando na CA continuam funcionando")
+		log.Println("[backend] CA local legada (cert_proxy_data) importada para o Postgres - dispositivos ja confiando na CA continuam funcionando")
 		return ca, nil
 	}
 
@@ -97,8 +97,8 @@ func loadOrImportCA(db *sql.DB) (*localCA, error) {
 	tpl := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName:   getenv("CA_COMMON_NAME", "Central Local Development CA"),
-			Organization: []string{"Central Docker Stack"},
+			CommonName:   getenv("CA_COMMON_NAME", "Bindnet Local Development CA"),
+			Organization: []string{"Bindnet Docker Stack"},
 		},
 		NotBefore:             now.Add(-time.Hour),
 		NotAfter:              now.AddDate(10, 0, 0),
@@ -140,7 +140,7 @@ func readCAFromPostgres(db *sql.DB) (*localCA, error) {
 }
 
 func insertCA(db *sql.DB, cert *x509.Certificate, certificatePEM, privateKeyPEM, source string) (*localCA, error) {
-	organization := "Central Docker Stack"
+	organization := "Bindnet Docker Stack"
 	if len(cert.Subject.Organization) > 0 {
 		organization = cert.Subject.Organization[0]
 	}
@@ -398,7 +398,7 @@ func registerCertificateRoutes(mux *http.ServeMux, admin *administrator, db *sql
 	}))
 
 	mux.HandleFunc("GET /api/certificates/ca", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		serveCertificate(w, ca.CertificatePEM, "central-local-ca.crt")
+		serveCertificate(w, ca.CertificatePEM, "bindnet-local-ca.crt")
 	}))
 }
 

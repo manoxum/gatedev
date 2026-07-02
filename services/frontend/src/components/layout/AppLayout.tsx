@@ -18,7 +18,7 @@ export function AppLayout() {
   return (
     <div className="flex min-h-screen bg-muted/30">
       <aside className="hidden w-60 flex-col border-r bg-background p-4 sm:flex">
-        <div className="mb-6 px-2 text-lg font-semibold">central</div>
+        <div className="mb-6 px-2 text-lg font-semibold">bindnet</div>
         <nav className="flex flex-col gap-1">
           {navItems.map(({ to, label, icon: Icon, end }) => (
             <NavLink

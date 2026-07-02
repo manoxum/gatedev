@@ -37,7 +37,7 @@ func main() {
 	}
 	defer audit.disconnect(context.Background())
 
-	worker := newWorkerClient(getenv("WORKER_SOCKET", "/run/central-admin/worker.sock"))
+	worker := newWorkerClient(getenv("WORKER_SOCKET", "/run/bindnet-admin/worker.sock"))
 
 	mux := http.NewServeMux()
 	registerAuthRoutes(mux, admin, audit)

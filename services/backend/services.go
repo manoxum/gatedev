@@ -5,16 +5,16 @@ import (
 	"net/http"
 )
 
-var monitoredContainers = []struct {
-	Key       string
-	Container string
+var monitoredServices = []struct {
+	Key     string
+	Service string
 }{
-	{"hotspot", "central-hotspot"},
-	{"dns", "central-dns-provider"},
-	{"nginxUi", "central-nginx-ui"},
-	{"postgres", "central-postgres"},
-	{"mongo", "central-mongo"},
-	{"minio", "central-minio"},
+	{"hotspot", "hotspot"},
+	{"dns", "dns-provider"},
+	{"nginxUi", "nginx-ui"},
+	{"postgres", "postgres"},
+	{"mongo", "mongo"},
+	{"minio", "minio"},
 }
 
 type serviceStatus struct {
@@ -24,18 +24,18 @@ type serviceStatus struct {
 	StartedAt string `json:"startedAt,omitempty"`
 }
 
-// registerDashboardRoutes agrega o status dos containers monitorados do
+// registerDashboardRoutes agrega o status dos servicos monitorados do
 // stack numa unica chamada, usada pela tela inicial do painel.
 func registerDashboardRoutes(mux *http.ServeMux, worker *workerClient, admin *administrator) {
 	mux.HandleFunc("GET /api/dashboard", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		result := make([]serviceStatus, 0, len(monitoredContainers))
-		for _, item := range monitoredContainers {
+		result := make([]serviceStatus, 0, len(monitoredServices))
+		for _, item := range monitoredServices {
 			var status struct {
 				Running   bool   `json:"rodando"`
 				Status    string `json:"status"`
 				StartedAt string `json:"iniciadoEm"`
 			}
-			if err := worker.call(r.Context(), http.MethodGet, "/containers/"+item.Container+"/status", nil, &status); err != nil {
+			if err := worker.call(r.Context(), http.MethodGet, "/containers/"+item.Service+"/status", nil, &status); err != nil {
 				result = append(result, serviceStatus{Key: item.Key, Status: "indisponivel"})
 				continue
 			}

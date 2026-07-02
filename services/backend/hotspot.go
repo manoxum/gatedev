@@ -90,8 +90,8 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		for _, container := range []string{"central-hotspot", "central-dns-provider"} {
-			if err := worker.call(r.Context(), http.MethodPost, "/containers/"+container+"/stop", nil, nil); err != nil {
+		for _, service := range []string{"hotspot", "dns-provider"} {
+			if err := worker.call(r.Context(), http.MethodPost, "/containers/"+service+"/stop", nil, nil); err != nil {
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
@@ -111,7 +111,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 			Status    string `json:"status"`
 			StartedAt string `json:"startedAt"`
 		}
-		if err := worker.call(r.Context(), http.MethodGet, "/containers/central-hotspot/status", nil, &status); err != nil {
+		if err := worker.call(r.Context(), http.MethodGet, "/containers/hotspot/status", nil, &status); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
@@ -123,7 +123,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 		}
 		if status.Running {
 			var logs strings.Builder
-			if err := worker.callText(r.Context(), "/containers/central-hotspot/logs?tail=200", &logs); err == nil {
+			if err := worker.callText(r.Context(), "/containers/hotspot/logs?tail=200", &logs); err == nil {
 				if m := channelRegex.FindStringSubmatch(logs.String()); m != nil {
 					response["channel"] = m[1]
 				}
@@ -153,7 +153,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 
 	mux.HandleFunc("GET /api/hotspot/logs", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_ = worker.streamLogs(r.Context(), w, "central-hotspot", r.URL.Query().Get("follow") == "true")
+		_ = worker.streamLogs(r.Context(), w, "hotspot", r.URL.Query().Get("follow") == "true")
 	}))
 }
 

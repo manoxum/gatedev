@@ -1,4 +1,4 @@
-# central
+# bindnet
 
 Stack Docker Compose de infraestrutura de rede local: hotspot Wi-Fi
 compartilhado, DNS split-horizon para domínios locais, uma UI para
@@ -11,8 +11,8 @@ também é a porta de entrada para o banco de dados principal
 arquivos provisionado para uso futuro (MinIO).
 
 > Regras de negócio detalhadas por serviço: veja [RULE.md](RULE.md).
-> Diretrizes para agentes de IA (Claude/Codex) trabalhando neste repo:
-> veja [CLAUDE.md](CLAUDE.md) e [AGENTS.md](AGENTS.md).
+> Diretrizes para ferramentas de IA trabalhando neste repo:
+> veja [CLAUDE.md](CLAUDE.md).
 
 ## Arquitetura
 
@@ -56,7 +56,8 @@ arquivos provisionado para uso futuro (MinIO).
 - **dns-provider** (`services/worker/dns/`) — servidor DNS Go próprio
   (não usa CoreDNS): resolve TLDs locais (`DNS_LOCAL_TLDS`) de forma
   diferente conforme quem pergunta (host/container/hotspot, ver
-  [RULE.md](RULE.md)) e encaminha o resto para DNS público.
+  [RULE.md](RULE.md)), resolve TLDs de discover (`DOMAINS`) para o IP
+  LAN desta instância e encaminha o resto para DNS público.
 - **nginx-ui** — interface de administração para configurar sites,
   acessível só pela porta administrativa `:9080` (nada mais faz proxy
   público nas portas 80/443 neste stack). Não recebe
@@ -117,11 +118,11 @@ arquivos provisionado para uso futuro (MinIO).
 2. Os volumes Docker do stack (`nginx_config`,
    `nginx_ui_data`, `www_data`, `cert_proxy_data`,
    `admin_data`, `postgres_data`, `mongo_data`,
-   `minio_data`) têm `name:` fixo no `docker-compose.yml` mas
-   **não** são `external: true` — o próprio `docker compose up` cria
-   cada um automaticamente na primeira vez que sobe o stack, e reaproveita
-   pelo nome se já existirem (ex.: de uma instalação anterior). Não é
-   preciso rodar `docker volume create` manualmente.
+   `minio_data`) são volumes gerenciados pelo Docker Compose,
+   sem `name:` fixo e sem `external: true` — o próprio
+   `docker compose up` cria cada um automaticamente na primeira vez
+   que sobe o stack, dentro do projeto Compose em uso. Não é preciso
+   rodar `docker volume create` manualmente.
 
    `cert_proxy_data` é legado (do antigo `cert-proxy`, já
    removido): hoje só é usado, uma única vez, para o `backend` importar
@@ -129,8 +130,8 @@ arquivos provisionado para uso futuro (MinIO).
    guardar a chave privada dessa CA — trate-o com o mesmo cuidado que o
    volume antigo (nunca apagar/recriar sem entender que isso invalida a
    confiança já estabelecida nos dispositivos do usuário). **Como esses
-   volumes não são mais `external`, `docker compose down -v` agora os
-   apaga — nunca rode `down -v` neste stack.**
+   volumes não são `external`, `docker compose down -v` os apaga —
+   nunca rode `down -v` neste stack.**
 
    (`worker_ipc`, usado só para o socket Unix entre `backend` e
    `worker`, também não precisa ser criado manualmente — é recriado a
@@ -204,13 +205,14 @@ Resumo das mais relevantes:
 | `HOTSPOT_GATEWAY` | não | `192.168.12.1` | IP do hotspot na rede local |
 | `DOCKER_HOST_GATEWAY` | não | — | IP do host visto pelos containers (bind extra do DNS) |
 | `DNS_LOCAL_TLDS` | não | `local,test,example` | TLDs resolvidos como locais pelo `dns-provider` |
+| `DOMAINS` | não | vazio | TLDs do discover mode, resolvidos para o IP LAN desta instância |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | sim (criação/atualização) | — | credenciais do painel web |
 | `BACKEND_PORT` | não | `8090` | porta da API do painel (`backend`) |
 | `FRONTEND_PORT` | não | `9090` | porta da interface web do painel (`frontend`) |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | sim | — | credenciais do banco principal (dados de certificados) |
 | `MONGO_USER` / `MONGO_PASSWORD` / `MONGO_DB` | sim | — | credenciais da trilha de auditoria do painel |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | sim | — | credenciais do MinIO (provisionado, sem uso ainda) |
-| `CA_COMMON_NAME` | não | `Central Local Development CA` | nome (CN) da CA local, só na primeira geração |
+| `CA_COMMON_NAME` | não | `Bindnet Local Development CA` | nome (CN) da CA local, só na primeira geração |
 | `TZ` | não | `Africa/Sao_Tome` | timezone dos containers |
 
 As regras de resolução automática de canal/banda do hotspot estão
@@ -225,7 +227,7 @@ escuta mais nas portas 80/443. Para baixar a CA:
 1. Acesse o painel (`http://<ip-do-host>:9090`) e faça login.
 2. Vá em "Certificados" e clique em "Baixar CA".
 
-Importe o arquivo baixado (`central-local-ca.crt`) no armazém de
+Importe o arquivo baixado (`bindnet-local-ca.crt`) no armazém de
 confiança do sistema operacional ou do navegador que for acessar
 sites assinados por essa CA. Diferente do antigo `cert-proxy`,
 certificados para domínios específicos não são mais emitidos
@@ -256,7 +258,7 @@ services/
     dns/                    # Go - servidor DNS split-horizon proprio do "dns-provider" (sem CoreDNS)
 RULE.md                   # regras de negócio de cada serviço
 CLAUDE.md                  # diretrizes para o Claude Code neste repo
-AGENTS.md                   # diretrizes para agentes de codificação (Codex etc.) neste repo
+CLAUDE.md                   # diretrizes para ferramentas de IA neste repo
 ```
 
 `postgres`, `mongo` e `minio` são imagens oficiais configuradas só no
@@ -269,14 +271,14 @@ AGENTS.md                   # diretrizes para agentes de codificação (Codex et
   suporta modo AP (`iw list` deve listar `AP` em "Supported interface
   modes").
 - **`dns-provider` não sobe / fica esperando IPs**: ele espera
-  `HOTSPOT_GATEWAY` (e `DOCKER_HOST_GATEWAY`, se definido) existirem
-  como IPs na máquina antes de iniciar — normalmente indica que o
-  `hotspot` ainda não subiu ou falhou.
+  `127.0.0.1` e `DOCKER_HOST_GATEWAY` existirem como IPs na máquina
+  antes de iniciar. O listener de `HOTSPOT_GATEWAY` é aberto depois,
+  automaticamente, quando o hotspot criar esse IP.
 - **Domínio local não resolve no host**: confirme que o resolver do
   sistema está apontando `127.0.0.1` para os TLDs de `DNS_LOCAL_TLDS`
   (ex: `systemd-resolved` com drop-in dedicado).
 - **Domínio local não resolve dentro de containers de outros projetos**:
-  configure o Docker daemon para usar o DNS do `central` como upstream:
+  configure o Docker daemon para usar o DNS do `bindnet` como upstream:
   `sudo bin/configure-docker-dns.sh` e depois reinicie o Docker. Sem
   isso, o DNS embutido do Docker (`127.0.0.11`) encaminha para o
   resolver do host e recebe a resposta da view host (`127.x.y.z`) em

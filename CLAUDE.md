@@ -7,7 +7,7 @@ de propor mudanças de comportamento.
 
 ## O que é este repositório
 
-`central` é um stack Docker Compose que roda **em uma máquina física
+`bindnet` é um stack Docker Compose que roda **em uma máquina física
 real**, controlando hardware de verdade: cria um hotspot Wi-Fi
 (`hotspot`), assume a placa Wi-Fi do host tirando-a do NetworkManager,
 serve DNS split-horizon (`dns-provider`), expõe uma UI de administração
@@ -40,10 +40,12 @@ máquina do usuário da rede Wi-Fi ou da internet.
   conexão de rede que outras pessoas/dispositivos estão usando agora.
   `nginx-ui`, `worker`, `backend`, `frontend`, `postgres`, `mongo`,
   `minio` e `migration` têm menor risco, mas ainda assim confirme.
-- **Nunca edite ou apague os volumes Docker nomeados e persistentes do stack**
+- **Nunca edite ou apague os volumes Docker persistentes do stack**
   (`nginx_config`, `nginx_ui_data`, `www_data`,
   `cert_proxy_data`, `admin_data`,
-  `postgres_data`, `mongo_data`, `minio_data`).
+  `postgres_data`, `mongo_data`, `minio_data`). Esses são os nomes
+  lógicos no `docker-compose.yml`; como não há `name:` fixo, o Docker
+  Compose cria os volumes reais escopados ao projeto.
   **`postgres_data` é o mais crítico**: guarda a chave privada
   da CA local de gestão de certificados (tabela `ca`, coluna
   `chave_pem`, em `services/backend/certificates.go`) — apagar/recriar

@@ -10,15 +10,16 @@ import (
 )
 
 // allowedContainers e a lista fechada de containers que o worker aceita
-// controlar. Qualquer outro nome (inclusive vindo de um path malicioso) e
-// rejeitado - o worker nunca executa "exec arbitrario".
+// controlar por servico do Compose. Qualquer outro nome (inclusive vindo
+// de um path malicioso) e rejeitado - o worker nunca executa "exec
+// arbitrario".
 var allowedContainers = map[string]bool{
-	"central-hotspot":      true,
-	"central-dns-provider": true,
-	"central-nginx-ui":     true,
-	"central-postgres":     true,
-	"central-mongo":        true,
-	"central-minio":        true,
+	"hotspot":      true,
+	"dns-provider": true,
+	"nginx-ui":     true,
+	"postgres":     true,
+	"mongo":        true,
+	"minio":        true,
 }
 
 func registerContainerRoutes(mux *http.ServeMux) {
@@ -31,14 +32,14 @@ func registerContainerRoutes(mux *http.ServeMux) {
 
 func handleContainerAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
-		if !allowedContainers[name] {
-			http.Error(w, "container nao permitido", http.StatusForbidden)
+		service := r.PathValue("name")
+		if !allowedContainers[service] {
+			http.Error(w, "servico nao permitido", http.StatusForbidden)
 			return
 		}
-		output, err := exec.Command("docker", action, name).CombinedOutput()
+		output, err := exec.Command("docker", composeArgs(action, service)...).CombinedOutput()
 		if err != nil {
-			log.Printf("[worker] erro ao executar docker %s %s: %v (%s)", action, name, err, output)
+			log.Printf("[worker] erro ao executar docker compose %s %s: %v (%s)", action, service, err, output)
 			http.Error(w, string(output), http.StatusBadGateway)
 			return
 		}
@@ -55,17 +56,23 @@ type containerStatus struct {
 }
 
 func handleContainerStatus(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	service := r.PathValue("name")
 	w.Header().Set("Content-Type", "application/json")
-	if !allowedContainers[name] {
-		http.Error(w, "container nao permitido", http.StatusForbidden)
+	if !allowedContainers[service] {
+		http.Error(w, "servico nao permitido", http.StatusForbidden)
+		return
+	}
+
+	name, err := composeServiceContainerID(service)
+	if err != nil || name == "" {
+		_ = json.NewEncoder(w).Encode(containerStatus{Name: service, Running: false, Status: "ausente"})
 		return
 	}
 
 	format := "{{.State.Running}}|{{.State.Status}}|{{.Config.Image}}|{{.State.StartedAt}}"
 	output, err := exec.Command("docker", "inspect", "--format", format, name).CombinedOutput()
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(containerStatus{Name: name, Running: false, Status: "ausente"})
+		_ = json.NewEncoder(w).Encode(containerStatus{Name: service, Running: false, Status: "ausente"})
 		return
 	}
 
@@ -75,7 +82,7 @@ func handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	running, _ := strconv.ParseBool(parts[0])
-	response := containerStatus{Name: name, Running: running, Status: parts[1], Image: parts[2]}
+	response := containerStatus{Name: service, Running: running, Status: parts[1], Image: parts[2]}
 	if running {
 		response.StartedAt = parts[3]
 	}
@@ -98,9 +105,9 @@ func (fw flushWriter) Write(p []byte) (int, error) {
 }
 
 func handleContainerLogs(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if !allowedContainers[name] {
-		http.Error(w, "container nao permitido", http.StatusForbidden)
+	service := r.PathValue("name")
+	if !allowedContainers[service] {
+		http.Error(w, "servico nao permitido", http.StatusForbidden)
 		return
 	}
 
@@ -108,11 +115,11 @@ func handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 	if tail == "" {
 		tail = "200"
 	}
-	args := []string{"logs", "--tail", tail}
+	args := composeArgs("logs", "--tail", tail)
 	if r.URL.Query().Get("follow") == "true" {
 		args = append(args, "-f")
 	}
-	args = append(args, name)
+	args = append(args, service)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	flusher, _ := w.(http.Flusher)
@@ -121,6 +128,6 @@ func handleContainerLogs(w http.ResponseWriter, r *http.Request) {
 	cmd.Stdout = flushWriter{w, flusher}
 	cmd.Stderr = flushWriter{w, flusher}
 	if err := cmd.Run(); err != nil {
-		log.Printf("[worker] docker logs %s encerrou: %v", name, err)
+		log.Printf("[worker] docker compose logs %s encerrou: %v", service, err)
 	}
 }

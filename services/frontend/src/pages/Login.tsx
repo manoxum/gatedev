@@ -42,7 +42,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>central</CardTitle>
+          <CardTitle>bindnet</CardTitle>
           <CardDescription>Entre para gerenciar o hotspot, DNS e certificados locais.</CardDescription>
         </CardHeader>
         <CardContent>

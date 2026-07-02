@@ -1,4 +1,4 @@
-// Comando worker e o unico componente do stack "central" com acesso
+// Comando worker e o unico componente do stack "bindnet" com acesso
 // privilegiado ao host (docker.sock, NetworkManager, network_mode: host).
 // Ele expoe uma API interna restrita, acessivel apenas via socket Unix
 // compartilhado com o service/backend - nunca por rede TCP.
@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 )
 
-const socketPath = "/run/central-admin/worker.sock"
+const socketPath = "/run/bindnet-admin/worker.sock"
 
 func main() {
 	log.SetFlags(log.LstdFlags)

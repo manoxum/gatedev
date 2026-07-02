@@ -1,4 +1,4 @@
-module central/dns-provider
+module bindnet/dns-provider
 
 go 1.23
 

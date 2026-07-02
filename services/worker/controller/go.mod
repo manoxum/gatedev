@@ -1,3 +1,3 @@
-module central/worker
+module bindnet/worker
 
 go 1.23

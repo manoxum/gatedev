@@ -1,9 +1,6 @@
-name: central-network-stack
-
 services:
   nginx-ui:
     image: uozi/nginx-ui:v2.3.11
-    container_name: central-nginx-ui
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
@@ -24,17 +21,16 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: central-postgres
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
-      POSTGRES_USER: ${POSTGRES_USER:-central}
+      POSTGRES_USER: ${POSTGRES_USER:-bindnet}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-central}
+      POSTGRES_DB: ${POSTGRES_DB:-bindnet}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-central} -d ${POSTGRES_DB:-central}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bindnet} -d ${POSTGRES_DB:-bindnet}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -46,13 +42,12 @@ services:
 
   mongo:
     image: mongo:7
-    container_name: central-mongo
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-central}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-bindnet}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
-      MONGO_INITDB_DATABASE: ${MONGO_DB:-central}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-bindnet}
     volumes:
       - mongo_data:/data/db
     networks:
@@ -60,7 +55,6 @@ services:
 
   minio:
     image: minio/minio
-    container_name: central-minio
     restart: unless-stopped
     # Provisionado para uso futuro de armazenamento de arquivos - nenhum
     # servico usa isso hoje (ver RULE.md).
@@ -76,7 +70,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: central-redis
     restart: unless-stopped
     # Cache para o dns-provider (mapeamento hostname -> IP de loopback);
     # hidratado a partir do Postgres na inicializacao do dns-provider,
@@ -101,14 +94,13 @@ services:
   migration:
     build:
       context: ./services/migration
-    image: central/db-migration:local
-    container_name: central-migration
+    image: bindnet/db-migration:local
     # Job one-shot: aplica "prisma migrate deploy" no Postgres e encerra -
     # nunca fica de pe como servidor, por isso nao reinicia sozinho.
     restart: "no"
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
-      DATABASE_URL: postgres://${POSTGRES_USER:-central}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-central}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-bindnet}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bindnet}?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
@@ -118,8 +110,7 @@ services:
   dns-provider:
     build:
       context: ./services/worker/dns
-    image: central/dns-provider:local
-    container_name: central-dns-provider
+    image: bindnet/dns-provider:local
     restart: unless-stopped
     network_mode: host
     env_file:
@@ -144,8 +135,7 @@ services:
   hotspot:
     build:
       context: ./services/worker/hotspot
-    image: central/create-ap-hotspot:local
-    container_name: central-hotspot
+    image: bindnet/create-ap-hotspot:local
     restart: unless-stopped
     privileged: true
     network_mode: host
@@ -155,8 +145,7 @@ services:
   worker:
     build:
       context: ./services/worker/controller
-    image: central/admin-worker:local
-    container_name: central-worker
+    image: bindnet/admin-worker:local
     restart: unless-stopped
     # Unico servico com acesso privilegiado ao host: controla os demais
     # containers (docker.sock), o NetworkManager (dbus + conf.d) e le as
@@ -169,31 +158,30 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /run/dbus:/run/dbus
       - /etc/NetworkManager/conf.d:/etc/NetworkManager/conf.d
-      - worker_ipc:/run/central-admin
+      - worker_ipc:/run/bindnet-admin
       - ./:/workspace
 
   backend:
     build:
       context: ./services/backend
-    image: central/admin-backend:local
-    container_name: central-backend
+    image: bindnet/admin-backend:local
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
       ADMIN_USERNAME: ${ADMIN_USERNAME}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       BACKEND_PORT: ${BACKEND_PORT:-8090}
-      POSTGRES_USER: ${POSTGRES_USER:-central}
+      POSTGRES_USER: ${POSTGRES_USER:-bindnet}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-central}
+      POSTGRES_DB: ${POSTGRES_DB:-bindnet}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
-      MONGO_USER: ${MONGO_USER:-central}
+      MONGO_USER: ${MONGO_USER:-bindnet}
       MONGO_PASSWORD: ${MONGO_PASSWORD}
-      MONGO_DB: ${MONGO_DB:-central}
+      MONGO_DB: ${MONGO_DB:-bindnet}
       MONGO_HOST: mongo
       MONGO_PORT: "27017"
-      CA_COMMON_NAME: ${CA_COMMON_NAME:-Central Local Development CA}
+      CA_COMMON_NAME: ${CA_COMMON_NAME:-Bindnet Local Development CA}
     ports:
       - "${BACKEND_PORT:-8090}:8090"
     volumes:
@@ -207,7 +195,7 @@ services:
       # gerado no primeiro boot) para exibir no painel - nunca escreve
       # nesse volume, quem administra o nginx-ui e o proprio nginx-ui.
       - nginx_ui_data:/nginx-ui-data:ro
-      - worker_ipc:/run/central-admin
+      - worker_ipc:/run/bindnet-admin
     depends_on:
       worker:
         condition: service_started
@@ -223,8 +211,7 @@ services:
   frontend:
     build:
       context: ./services/frontend
-    image: central/admin-frontend:local
-    container_name: central-frontend
+    image: bindnet/admin-frontend:local
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-9090}:80"
@@ -246,24 +233,17 @@ networks:
         - subnet: 10.91.0.0/24
 
 volumes:
-  # Volumes com "name:" fixo mas sem "external: true": o Docker Compose
-  # cria automaticamente se nao existirem (sem precisar de "docker volume
-  # create" manual) e reaproveita pelo nome se ja existirem - preserva os
-  # dados de instalacoes anteriores, so remove a exigencia de criacao
-  # manual antes do primeiro "docker compose up".
+  # Volumes gerenciados pelo Docker Compose: o Compose cria
+  # automaticamente se nao existirem e reaproveita enquanto o projeto for
+  # o mesmo. Nao use "docker compose down -v" neste stack.
   nginx_config:
-    name: nginx_config
   nginx_ui_data:
-    name: nginx_ui_data
   www_data:
-    name: www_data
   cert_proxy_data:
     # Volume legado do antigo cert-proxy (removido). Mantido apenas para
     # o backend importar a CA existente uma unica vez (loadOrImportCA);
     # NAO apagar - contem a CA ja confiada nos dispositivos do usuario.
-    name: cert_proxy_data
   admin_data:
-    name: admin_data
   postgres_data:
     # Banco de dados principal do stack. Guarda, entre outras coisas, a
     # chave privada da CA local de gestao de certificados (tabela "ca",
@@ -272,13 +252,9 @@ volumes:
     # confiados nos dispositivos do usuario (mesmo risco que o antigo
     # cert_proxy_data). Sem "external: true", "docker compose down -v"
     # AGORA apaga este volume - nunca rode "down -v" neste stack.
-    name: postgres_data
   mongo_data:
-    name: mongo_data
   minio_data:
-    name: minio_data
   redis_data:
-    name: redis_data
   worker_ipc:
     # Guarda so o socket Unix efemero de IPC entre backend e worker -
     # ao contrario dos volumes acima, nao precisa sobreviver a um

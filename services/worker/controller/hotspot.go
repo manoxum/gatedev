@@ -30,7 +30,14 @@ func handleHotspotClients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := exec.Command("docker", "exec", "central-hotspot", "create_ap", "--list-clients", iface).CombinedOutput()
+	containerID, err := composeServiceContainerID("hotspot")
+	if err != nil || containerID == "" {
+		log.Printf("[worker] erro ao localizar container do hotspot: %v", err)
+		_ = json.NewEncoder(w).Encode([]hotspotClient{})
+		return
+	}
+
+	output, err := exec.Command("docker", "exec", containerID, "create_ap", "--list-clients", iface).CombinedOutput()
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		log.Printf("[worker] erro ao listar clientes do hotspot: %v (%s)", err, output)

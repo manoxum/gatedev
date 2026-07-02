@@ -1,4 +1,4 @@
-module central/backend
+module bindnet/backend
 
 go 1.25.0
 

@@ -15,7 +15,7 @@ import (
 // nmDropin e o arquivo de configuracao que marca a interface Wi-Fi
 // como nao-gerenciada pelo NetworkManager, para o hostapd assumir o
 // controle dela durante o hotspot.
-const nmDropin = "/etc/NetworkManager/conf.d/90-central-hotspot-unmanaged.conf"
+const nmDropin = "/etc/NetworkManager/conf.d/90-bindnet-hotspot-unmanaged.conf"
 
 func registerNetworkRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /network/interfaces", handleInterfaces)

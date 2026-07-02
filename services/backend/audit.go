@@ -30,7 +30,7 @@ type auditEvent struct {
 func openMongo() (*auditClient, error) {
 	uri := fmt.Sprintf(
 		"mongodb://%s:%s@%s:%s",
-		getenv("MONGO_USER", "central"),
+		getenv("MONGO_USER", "bindnet"),
 		getenv("MONGO_PASSWORD", ""),
 		getenv("MONGO_HOST", "mongo"),
 		getenv("MONGO_PORT", "27017"),
@@ -42,7 +42,7 @@ func openMongo() (*auditClient, error) {
 	if err := client.Ping(context.Background(), nil); err != nil {
 		return nil, err
 	}
-	db := client.Database(getenv("MONGO_DB", "central"))
+	db := client.Database(getenv("MONGO_DB", "bindnet"))
 	return &auditClient{collection: db.Collection("audit_log"), client: client}, nil
 }
 
