@@ -598,8 +598,9 @@ Regras:
 - O entrypoint operacional é `bin/promote` (submódulo `docker-cli`) via
   `Makefile`. A topologia Compose deve ficar dividida em
   `docker-compose.infra.yml`, `docker-compose.services.yml`,
-  `docker-compose.assets.build.yml`, `docker-compose.assets.ports.yml`,
-  `docker-compose.deploy.yml` e o agregador `docker-compose.yml`.
+  `docker-compose.assets.build.yml`, `docker-compose.deploy.yml` e o
+  agregador `docker-compose.yml`. Portas publicadas devem ficar nos
+  compose de infra/services, não em overlays `ports`.
 - Todo `entrypoint.sh`/script novo deve seguir `set -euo pipefail` (ou
   equivalente em `sh`), falhar alto (erro explícito + `exit 1`) em vez
   de continuar em estado inconsistente, e logar em português com

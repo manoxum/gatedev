@@ -223,6 +223,7 @@ Resumo das mais relevantes:
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | sim (criação/atualização) | — | credenciais do painel web |
 | `BACKEND_PORT` | não | `8090` | porta da API do painel (`backend`) |
 | `FRONTEND_PORT` | não | `9090` | porta da interface web do painel (`frontend`) |
+| `POSTGRES_PORT` | não | `9054` | porta local publicada para manutenção do Postgres |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | sim | — | credenciais do banco principal (dados de certificados) |
 | `MONGO_USER` / `MONGO_PASSWORD` / `MONGO_DB` | sim | — | credenciais da trilha de auditoria do painel |
 | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | sim | — | credenciais do MinIO (provisionado, sem uso ainda) |
@@ -271,7 +272,7 @@ Comandos principais:
 
 ```bash
 make dev        # bin/promote dev
-make run-local  # service + assets.ports
+make run-local  # service
 make run-infra
 make run-service
 make stop-all
@@ -283,7 +284,6 @@ O compose é dividido em camadas:
 - `docker-compose.infra.yml`: nginx-ui, Postgres, Mongo, MinIO e Redis.
 - `docker-compose.services.yml`: migration, dns-provider, hotspot, worker, backend e frontend.
 - `docker-compose.assets.build.yml`: contextos de build dos serviços próprios.
-- `docker-compose.assets.ports.yml`: portas locais (`NGINX_UI_PORT`, `BACKEND_PORT`, `FRONTEND_PORT`).
 - `docker-compose.deploy.yml`: agregador de infra + services.
 - `docker-compose.yml`: agregador principal usado por `bin/promote`.
 

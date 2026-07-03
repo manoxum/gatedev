@@ -24,6 +24,7 @@ services:
       POSTGRES_HOST: 10.91.0.10
       REDIS_HOST: 10.91.0.11
       NGINX_CONFIG_PATH: /nginx-config
+      DISCOVER_PORT: ${DISCOVER_PORT:-8531}
     volumes:
       - nginx_config:/nginx-config:ro
     depends_on:
@@ -94,6 +95,8 @@ services:
       NGINX_UI_PASSWORD: ${NGINX_UI_PASSWORD:-}
     expose:
       - "8090"
+    ports:
+      - "${BACKEND_PORT:-8090}:8090"
     volumes:
       - admin_data:/data
       - cert_proxy_data:/certproxy-data:ro
@@ -117,6 +120,8 @@ services:
     restart: unless-stopped
     expose:
       - "80"
+    ports:
+      - "${FRONTEND_PORT:-9090}:80"
     depends_on:
       - backend
     networks:

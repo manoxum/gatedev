@@ -41,7 +41,7 @@ run-service:
 	@./bin/promote run service
 
 run-local:
-	@./bin/promote run service +assets.ports
+	@./bin/promote run service
 
 run-all:
 	@./bin/promote run *

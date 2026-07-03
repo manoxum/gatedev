@@ -16,8 +16,6 @@ compose_files:
 
 dev:
   dockerfile: dev.dockerfile
-  compose_files:
-    - docker-compose.assets.ports.yml
 
   services:
     migration:

@@ -5,6 +5,10 @@ services:
     environment:
       TZ: ${TZ:-Africa/Sao_Tome}
       NGINX_UI_IGNORE_DOCKER_SOCKET: "true"
+    ports:
+      - "${NGINX_UI_PORT:-9080}:9000"
+      - "443:443"
+      - "80:80"
     expose:
       - "9000"
     volumes:
@@ -26,6 +30,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-bindnet}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-9054}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bindnet} -d ${POSTGRES_DB:-bindnet}"]
       interval: 5s
