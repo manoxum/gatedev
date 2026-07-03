@@ -63,6 +63,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 		iface, err := currentHotspotInterface(r, worker)
 		if err == nil {
 			reapplyHotspotBlocklist(r.Context(), db, worker, iface)
+			reapplyHotspotShaping(r.Context(), db, worker, iface)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -85,6 +86,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 			return
 		}
 		reapplyHotspotBlocklist(r.Context(), db, worker, iface)
+		reapplyHotspotShaping(r.Context(), db, worker, iface)
 		username, _ := sessionUser(r, admin)
 		audit.record(r.Context(), "hotspot_started", username, nil)
 		w.WriteHeader(http.StatusNoContent)

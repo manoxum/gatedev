@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 func main() {
@@ -48,11 +49,17 @@ func main() {
 	registerHotspotRoutes(mux, worker, admin, audit, db)
 	registerHotspotDeviceRoutes(mux, admin, db, worker)
 	registerHotspotBlocklistRoutes(mux, admin, db, worker)
+	registerHotspotLimitRoutes(mux, admin, db, worker)
+	registerHotspotTrafficRoutes(mux, admin, db)
+	registerHotspotCreditRoutes(mux, admin, db, worker, audit)
+	registerHotspotStatsRoutes(mux, admin, db, worker)
 	registerDNSRoutes(mux, worker, admin, audit)
 	registerDNSRouteRoutes(mux, admin, db, audit)
 	registerDNSPeerRoutes(mux, admin, db)
 	registerCertificateRoutes(mux, admin, db, ca, worker, audit)
 	registerNginxUIRoutes(mux, admin)
+
+	go startHotspotReconciliationLoop(db, worker, 15*time.Second)
 
 	port := getenv("BACKEND_PORT", "8090")
 	log.Println("[backend] ouvindo em :" + port)

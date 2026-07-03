@@ -40,6 +40,7 @@ func main() {
 	registerNetworkRoutes(mux)
 	registerEnvRoutes(mux)
 	registerCARoutes(mux)
+	registerShapingRoutes(mux)
 
 	log.Println("[worker] API interna pronta em", socketPath)
 	if err := http.Serve(listener, mux); err != nil {

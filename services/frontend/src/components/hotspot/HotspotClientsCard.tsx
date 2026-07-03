@@ -1,4 +1,5 @@
-import { Ban, RefreshCw, ScanSearch, Undo2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Ban, RefreshCw, ScanSearch, Settings2, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +37,7 @@ export function HotspotClientsCard({
   onBlock,
   onUnblock,
 }: HotspotClientsCardProps) {
+  const navigate = useNavigate();
   return (
     <Card>
       <CardHeader>
@@ -81,6 +83,14 @@ export function HotspotClientsCard({
                 </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate(`/hotspot/devices/${encodeURIComponent(client.mac)}`)}
+                    >
+                      <Settings2 className="h-4 w-4" />
+                      Ver detalhes
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"

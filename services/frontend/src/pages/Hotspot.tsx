@@ -8,6 +8,7 @@ import { HotspotConfigForm } from "@/components/hotspot/HotspotConfigForm";
 import { HotspotBlocklistCard } from "@/components/hotspot/HotspotBlocklistCard";
 import { HotspotClientsCard } from "@/components/hotspot/HotspotClientsCard";
 import { HotspotSummaryCard } from "@/components/hotspot/HotspotSummaryCard";
+import { GlobalLimitsCard } from "@/components/hotspot/GlobalLimitsCard";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
 import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
 import { useHotspotMutations } from "@/components/hotspot/useHotspotMutations";
@@ -76,7 +77,7 @@ export function HotspotPage() {
       />
 
       <Tabs defaultValue="connected" className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-3 sm:inline-grid sm:w-auto">
+        <TabsList className="grid h-auto w-full grid-cols-4 sm:inline-grid sm:w-auto">
           <TabsTrigger value="connected" className="gap-2">
             Conectados
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
@@ -89,6 +90,7 @@ export function HotspotPage() {
               {blockedCount}
             </span>
           </TabsTrigger>
+          <TabsTrigger value="limits">Limites</TabsTrigger>
           <TabsTrigger value="logs">Logs</TabsTrigger>
         </TabsList>
 
@@ -111,6 +113,10 @@ export function HotspotPage() {
             unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
             onUnblock={(mac) => unblock.mutate(mac)}
           />
+        </TabsContent>
+
+        <TabsContent value="limits" className="mt-0">
+          <GlobalLimitsCard />
         </TabsContent>
 
         <TabsContent value="logs" className="mt-0">

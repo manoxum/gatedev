@@ -77,6 +77,10 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 	if err != nil {
 		return nil, err
 	}
+	blockedByCredit, err := hotspotCreditBlockedSet(db)
+	if err != nil {
+		return nil, err
+	}
 
 	clients := make([]hotspotClientResponse, 0, len(live))
 	for _, client := range live {
@@ -84,7 +88,7 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 		if err != nil {
 			mac = strings.ToLower(strings.TrimSpace(client.MAC))
 		}
-		enriched := infoToClientFields(mac, info[mac], blocked[mac])
+		enriched := infoToClientFields(mac, info[mac], blocked[mac] || blockedByCredit[mac])
 		enriched.IP = client.IP
 		enriched.Hostname = client.Hostname
 		clients = append(clients, enriched)

@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { HotspotBlockedDevice } from "@/components/hotspot/HotspotBlocklistCard";
 import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
+import type { HotspotLimits, HotspotTraffic } from "@/components/hotspot/hotspot-limits-types";
+import type { HotspotCredit } from "@/components/hotspot/hotspot-credit-types";
 
 export interface HotspotStatus {
   running: boolean;
@@ -42,4 +44,44 @@ export function useHotspotQueries() {
   });
 
   return { status, config, interfaces, clients, blocklist };
+}
+
+export function useGlobalLimits() {
+  return useQuery<HotspotLimits>({
+    queryKey: ["hotspot", "limits", "global"],
+    queryFn: () => api.get<HotspotLimits>("/hotspot/limits/global"),
+  });
+}
+
+export function useGlobalTraffic() {
+  return useQuery<HotspotTraffic>({
+    queryKey: ["hotspot", "limits", "global", "traffic"],
+    queryFn: () => api.get<HotspotTraffic>("/hotspot/limits/global/traffic"),
+    refetchInterval: 15000,
+  });
+}
+
+export function useDeviceLimits(mac: string) {
+  return useQuery<HotspotLimits>({
+    queryKey: ["hotspot", "devices", mac, "limits"],
+    queryFn: () => api.get<HotspotLimits>(`/hotspot/devices/${encodeURIComponent(mac)}/limits`),
+    enabled: !!mac,
+  });
+}
+
+export function useDeviceTraffic(mac: string) {
+  return useQuery<HotspotTraffic>({
+    queryKey: ["hotspot", "devices", mac, "traffic"],
+    queryFn: () => api.get<HotspotTraffic>(`/hotspot/devices/${encodeURIComponent(mac)}/traffic`),
+    enabled: !!mac,
+    refetchInterval: 15000,
+  });
+}
+
+export function useDeviceCredit(mac: string) {
+  return useQuery<HotspotCredit>({
+    queryKey: ["hotspot", "devices", mac, "credit"],
+    queryFn: () => api.get<HotspotCredit>(`/hotspot/devices/${encodeURIComponent(mac)}/credit`),
+    enabled: !!mac,
+  });
 }
