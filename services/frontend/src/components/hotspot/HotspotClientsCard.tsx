@@ -4,6 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { SpeedGauge } from "@/components/ui/speed-gauge";
+import { toBitsPerSecond } from "@/components/hotspot/device-detail/DeviceSpeedCard";
+import { useClientsStats } from "@/components/hotspot/useHotspotQueries";
 
 export interface HotspotClient {
   mac: string;
@@ -38,6 +41,9 @@ export function HotspotClientsCard({
   onUnblock,
 }: HotspotClientsCardProps) {
   const navigate = useNavigate();
+  const stats = useClientsStats(running);
+  const statsByMac = new Map(stats.data?.map((entry) => [entry.mac, entry]));
+
   return (
     <Card>
       <CardHeader>
@@ -50,12 +56,15 @@ export function HotspotClientsCard({
               <TableHead>MAC</TableHead>
               <TableHead>Endereço</TableHead>
               <TableHead>Perfil</TableHead>
+              <TableHead>Velocidade</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {clients.map((client) => (
+            {clients.map((client) => {
+              const clientStats = statsByMac.get(client.mac);
+              return (
               <TableRow key={client.mac}>
                 <TableCell className="font-mono text-xs">{client.mac}</TableCell>
                 <TableCell>
@@ -77,6 +86,12 @@ export function HotspotClientsCard({
                   ) : (
                     <span className="text-sm text-muted-foreground">Sem identificação</span>
                   )}
+                </TableCell>
+                <TableCell>
+                  <div className="flex gap-2">
+                    <SpeedGauge valueBps={toBitsPerSecond(clientStats?.downloadBps ?? 0)} label="Down" size="sm" />
+                    <SpeedGauge valueBps={toBitsPerSecond(clientStats?.uploadBps ?? 0)} label="Up" size="sm" />
+                  </div>
                 </TableCell>
                 <TableCell>
                   <Badge variant={client.blocked ? "destructive" : "success"}>{client.blocked ? "bloqueado" : "ativo"}</Badge>
@@ -128,10 +143,11 @@ export function HotspotClientsCard({
                   </div>
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
             {running && clients.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Nenhum cliente conectado.
                 </TableCell>
               </TableRow>

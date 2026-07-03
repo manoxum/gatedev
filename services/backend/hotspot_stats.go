@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -29,6 +30,11 @@ type hotspotDeviceStatsResponse struct {
 	UploadBps   float64 `json:"uploadBps"`
 }
 
+type hotspotClientStatsEntry struct {
+	MAC string `json:"mac"`
+	hotspotDeviceStatsResponse
+}
+
 func registerHotspotStatsRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB, worker *workerClient) {
 	mux.HandleFunc("GET /api/hotspot/devices/{mac}/stats", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		mac, err := normalizeHotspotMAC(r.PathValue("mac"))
@@ -43,6 +49,16 @@ func registerHotspotStatsRoutes(mux *http.ServeMux, admin *administrator, db *sq
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
+	}))
+
+	mux.HandleFunc("GET /api/hotspot/clients/stats", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		entries, err := allClientsLiveStats(r.Context(), db, worker)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(entries)
 	}))
 }
 
@@ -59,6 +75,38 @@ func deviceLiveStats(ctx context.Context, db *sql.DB, worker *workerClient, mac 
 	if !found {
 		return hotspotDeviceStatsResponse{}, nil
 	}
+	return trackedDeviceRate(ctx, db, worker, iface, mac, ip)
+}
+
+// allClientsLiveStats calcula a taxa de todos os clientes conectados
+// agora numa unica passada (uma so listagem de clientes ao worker, em
+// vez de N requisicoes separadas como a pagina de detalhe faria) -
+// usada pela tela de clientes conectados, que mostra um velocimetro
+// por linha.
+func allClientsLiveStats(ctx context.Context, db *sql.DB, worker *workerClient) ([]hotspotClientStatsEntry, error) {
+	iface, err := hotspotWifiInterface(ctx, worker)
+	if err != nil {
+		return nil, err
+	}
+	clients, err := liveHotspotClients(ctx, worker, iface)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]hotspotClientStatsEntry, 0, len(clients))
+	for _, client := range clients {
+		rate, err := trackedDeviceRate(ctx, db, worker, iface, client.MAC, client.IP)
+		if err != nil {
+			log.Printf("[backend] falha ao ler velocidade de %s: %v", client.MAC, err)
+			continue
+		}
+		entries = append(entries, hotspotClientStatsEntry{MAC: client.MAC, hotspotDeviceStatsResponse: rate})
+	}
+	return entries, nil
+}
+
+// trackedDeviceRate garante a regra de contagem do dispositivo e
+// devolve a taxa calculada desde a ultima leitura.
+func trackedDeviceRate(ctx context.Context, db *sql.DB, worker *workerClient, iface, mac, ip string) (hotspotDeviceStatsResponse, error) {
 	if err := ensureDeviceShaping(ctx, db, worker, iface, mac, ip); err != nil {
 		return hotspotDeviceStatsResponse{}, err
 	}

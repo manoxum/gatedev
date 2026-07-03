@@ -78,6 +78,21 @@ export function useDeviceTraffic(mac: string) {
   });
 }
 
+export interface HotspotClientStats {
+  mac: string;
+  downloadBps: number;
+  uploadBps: number;
+}
+
+export function useClientsStats(enabled: boolean) {
+  return useQuery<HotspotClientStats[]>({
+    queryKey: ["hotspot", "clients", "stats"],
+    queryFn: () => api.get<HotspotClientStats[]>("/hotspot/clients/stats"),
+    refetchInterval: 2500,
+    enabled,
+  });
+}
+
 export function useDeviceCredit(mac: string) {
   return useQuery<HotspotCredit>({
     queryKey: ["hotspot", "devices", mac, "credit"],

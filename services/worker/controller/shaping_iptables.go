@@ -47,13 +47,23 @@ func ensureDeviceMarkRules(apIface, uplinkIface, mac, ip string, fwmark int) err
 	return refreshDeviceIP(apIface, uplinkIface, mac, ip, fwmark)
 }
 
-// refreshDeviceIP apaga (por comentario, idempotente) a regra de
-// download anterior do dispositivo e recria com o IP atual - sem
-// precisar saber qual era o IP antigo.
+// refreshDeviceIP e um no-op quando a regra de download do dispositivo
+// ja casa com o IP atual (preserva o contador de bytes entre chamadas -
+// ensureDeviceShaping e chamada a cada poll de 2-3s da pagina de
+// detalhe e a cada ciclo de reconciliacao, entao um "sempre recria"
+// aqui zerava a contagem de download constantemente, impedindo a
+// velocidade ao vivo de refletir tráfego real). So apaga (por
+// comentario) e recria quando o IP realmente mudou - renovacao de DHCP
+// - sem precisar saber qual era o IP antigo.
 func refreshDeviceIP(apIface, uplinkIface, mac, ip string, fwmark int) error {
 	downComment := "bn-down-" + mac
-	deleteRulesByComment(downComment)
 	markHex := "0x" + strconv.FormatInt(int64(fwmark), 16)
+	if err := iptablesCheck("-t", "mangle", "-C", shapingChain,
+		"-i", uplinkIface, "-o", apIface, "-d", ip,
+		"-m", "comment", "--comment", downComment, "-j", "MARK", "--set-mark", markHex); err == nil {
+		return nil
+	}
+	deleteRulesByComment(downComment)
 	if err := runIptables("-t", "mangle", "-A", shapingChain,
 		"-i", uplinkIface, "-o", apIface, "-d", ip,
 		"-m", "comment", "--comment", downComment, "-j", "MARK", "--set-mark", markHex); err != nil {
