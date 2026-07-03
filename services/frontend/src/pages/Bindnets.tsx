@@ -13,6 +13,7 @@ import {
   nodePath,
   nodeTone,
   nodeLabel,
+  remoteRoutes,
   serviceRowsForNode,
   unlinkPeerAddress,
   useMeshData,
@@ -39,8 +40,9 @@ export function BindnetsPage() {
   const mesh = useMeshData();
   const data = mesh.data;
   const nodes = data?.nodes ?? [];
-  const activeRoutes = data?.routes.filter((route) => route.state === "ok").length ?? 0;
-  const totalServices = (data?.localServices.length ?? 0) + (data?.routes.length ?? 0);
+  const visibleRemoteRoutes = data ? remoteRoutes(data) : [];
+  const activeRoutes = visibleRemoteRoutes.filter((route) => route.state === "ok").length;
+  const totalServices = data ? nodes.reduce((total, node) => total + serviceRowsForNode(node, data).length, 0) : 0;
 
   const unlinkPeer = useMutation({
     mutationFn: (node: BindnetNode) => unlinkPeerAddress(data?.config, node.address),

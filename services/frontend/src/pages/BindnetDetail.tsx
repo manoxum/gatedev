@@ -7,7 +7,16 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { metricCards, neighborRows, nodeTone, routesViaNode, serviceRowsForNode, unlinkPeerAddress, useMeshData } from "@/lib/mesh";
+import {
+  metricCards,
+  neighborRows,
+  nodeTone,
+  remoteRoutes,
+  routesViaNode,
+  serviceRowsForNode,
+  unlinkPeerAddress,
+  useMeshData,
+} from "@/lib/mesh";
 import { EmptyState } from "@/components/bindnets/EmptyState";
 import { BindnetCaSection } from "@/components/bindnets/BindnetCaSection";
 import { BindnetOverviewTab } from "@/components/bindnets/BindnetOverviewTab";
@@ -73,6 +82,7 @@ export function BindnetDetailPage() {
   const services = serviceRowsForNode(node, data);
   const neighbors = neighborRows(node, data);
   const routed = routesViaNode(node, data.routes);
+  const visibleRoutes = node.kind === "direct" ? routed : remoteRoutes(data);
   const metrics = metricCards(node, data);
 
   return (
@@ -122,7 +132,7 @@ export function BindnetDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="routes">
             <Route className="h-4 w-4" />
-            Rotas ({node.kind === "direct" ? routed.length : data.routes.length})
+            Rotas ({visibleRoutes.length})
           </TabsTrigger>
           <TabsTrigger value="ca">
             <ShieldCheck className="h-4 w-4" />
@@ -140,7 +150,7 @@ export function BindnetDetailPage() {
         </TabsContent>
         <TabsContent value="routes">
           <BindnetRoutesTab
-            routes={node.kind === "direct" ? routed : data.routes}
+            routes={visibleRoutes}
             forgetPending={forgetRoute.isPending}
             onForget={(domain) => forgetRoute.mutate(domain)}
           />

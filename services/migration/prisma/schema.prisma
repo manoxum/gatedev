@@ -133,6 +133,7 @@ model DiscoverPeer {
   address     String   @unique
   nodeName    String   @map("node_name")
   fingerprint String?
+  domains     String[] @default([])
   source      String   @default("manual-scan")
   lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz

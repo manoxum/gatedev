@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 // defaultEnvPath e o env compartilhado do repositorio, montado em
@@ -138,12 +140,12 @@ func updateEnvKeys(path string, values map[string]string) error {
 			continue
 		}
 		if newValue, exists := remaining[key]; exists {
-			lines[i] = fmt.Sprintf("%s=%s", key, newValue)
+			lines[i] = fmt.Sprintf("%s=%s", key, formatEnvValue(newValue))
 			delete(remaining, key)
 		}
 	}
 	for key, value := range remaining {
-		lines = append(lines, fmt.Sprintf("%s=%s", key, value))
+		lines = append(lines, fmt.Sprintf("%s=%s", key, formatEnvValue(value)))
 	}
 
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
@@ -160,5 +162,37 @@ func parseEnvLine(line string) (key, value string, ok bool) {
 	if len(parts) != 2 {
 		return "", "", false
 	}
-	return strings.TrimSpace(parts[0]), parts[1], true
+	return strings.TrimSpace(parts[0]), normalizeEnvValue(parts[1]), true
+}
+
+func normalizeEnvValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) < 2 {
+		return trimmed
+	}
+	if (strings.HasPrefix(trimmed, `"`) && strings.HasSuffix(trimmed, `"`)) ||
+		(strings.HasPrefix(trimmed, `'`) && strings.HasSuffix(trimmed, `'`)) {
+		if unquoted, err := strconv.Unquote(trimmed); err == nil {
+			return unquoted
+		}
+		return strings.Trim(trimmed, `"'`)
+	}
+	return trimmed
+}
+
+func formatEnvValue(value string) string {
+	if value == "" {
+		return ""
+	}
+	needsQuote := false
+	for _, r := range value {
+		if unicode.IsSpace(r) || r == '"' || r == '\'' || r == '#' || r == '\\' {
+			needsQuote = true
+			break
+		}
+	}
+	if !needsQuote {
+		return value
+	}
+	return strconv.Quote(value)
 }

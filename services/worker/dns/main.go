@@ -11,6 +11,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/miekg/dns"
@@ -54,7 +55,11 @@ func main() {
 		log.Fatalf("[dns-provider] erro ao interpretar HOST_SOURCE_CIDR: %v", err)
 	}
 	if len(hostSourceIPs) > 0 {
-		log.Printf("[dns-provider] IPs LAN/peer detectados via HOST_SOURCE_CIDR: %v", hostSourceIPs)
+		if strings.TrimSpace(os.Getenv("HOST_SOURCE_CIDR")) == "" {
+			log.Printf("[dns-provider] IPs LAN/peer detectados automaticamente: %v", hostSourceIPs)
+		} else {
+			log.Printf("[dns-provider] IPs LAN/peer detectados via HOST_SOURCE_CIDR: %v", hostSourceIPs)
+		}
 	}
 
 	dockerExcludes := append([]string{hotspotGateway}, hostSourceIPs...)

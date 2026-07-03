@@ -17,3 +17,16 @@ func TestDiscoverHostSourceIPsRejectsLoopback(t *testing.T) {
 		t.Fatalf("discoverHostSourceIPs accepted loopback HOST_SOURCE_CIDR")
 	}
 }
+
+func TestIsIgnoredLANInterface(t *testing.T) {
+	for _, name := range []string{"lo", "ap0", "docker0", "br-abcd", "veth123", "wg0"} {
+		if !isIgnoredLANInterface(name) {
+			t.Fatalf("isIgnoredLANInterface(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"eth0", "wlp2s0", "enp3s0"} {
+		if isIgnoredLANInterface(name) {
+			t.Fatalf("isIgnoredLANInterface(%q) = true, want false", name)
+		}
+	}
+}

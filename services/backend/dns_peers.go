@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -24,7 +25,7 @@ type discoveredPeer struct {
 func registerDNSPeerRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB, worker *workerClient, audit *auditClient) {
 	mux.HandleFunc("GET /api/dns/peers", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.QueryContext(r.Context(), `
-			SELECT address, node_name, COALESCE(fingerprint, ''), source, last_seen_at
+			SELECT address, node_name, COALESCE(fingerprint, ''), COALESCE(array_to_string(domains, ','), ''), source, last_seen_at
 			FROM discover_peers ORDER BY node_name, address
 		`)
 		if err != nil {
@@ -36,10 +37,12 @@ func registerDNSPeerRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB,
 		peers := []discoveredPeer{}
 		for rows.Next() {
 			var peer discoveredPeer
-			if err := rows.Scan(&peer.Address, &peer.NodeName, &peer.Fingerprint, &peer.Source, &peer.LastSeenAt); err != nil {
+			var domains string
+			if err := rows.Scan(&peer.Address, &peer.NodeName, &peer.Fingerprint, &domains, &peer.Source, &peer.LastSeenAt); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+			peer.Domains = parsePeerList(domains)
 			peers = append(peers, peer)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -83,13 +86,28 @@ func replaceDiscoveredPeers(ctx context.Context, db *sql.DB, peers []discoveredP
 			continue
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO discover_peers (address, node_name, fingerprint, source, last_seen_at)
-			VALUES ($1, $2, NULLIF($3, ''), 'manual-scan', now())
-		`, peer.Address, fallbackPeerName(peer), strings.TrimSpace(peer.Fingerprint)); err != nil {
+			INSERT INTO discover_peers (address, node_name, fingerprint, domains, source, last_seen_at)
+			VALUES ($1, $2, NULLIF($3, ''), string_to_array($4, ','), 'manual-scan', now())
+		`, peer.Address, fallbackPeerName(peer), strings.TrimSpace(peer.Fingerprint), strings.Join(normalizeDomains(peer.Domains), ",")); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func normalizeDomains(domains []string) []string {
+	seen := map[string]bool{}
+	var normalized []string
+	for _, domain := range domains {
+		value := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(domain, ".")))
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		normalized = append(normalized, value)
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
 func loadConfiguredPeerAddresses(ctx context.Context, db *sql.DB) ([]string, error) {

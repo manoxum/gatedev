@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -122,7 +123,7 @@ func startDiscoverServer(cfg *dnsConfig, port string) {
 		_ = json.NewEncoder(w).Encode(discoverInfo{
 			NodeName:    cfg.nodeName,
 			Fingerprint: cfg.fingerprint,
-			Domains:     zoneNames(cfg.domainZones),
+			Domains:     routeDomains(ownRoutes(cfg)),
 		})
 	})
 	mux.HandleFunc("GET /discover/routes", func(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +136,15 @@ func startDiscoverServer(cfg *dnsConfig, port string) {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("[dns-provider] erro no servidor de descoberta: %v", err)
 	}
+}
+
+func routeDomains(routes map[string]discoveredRoute) []string {
+	domains := make([]string, 0, len(routes))
+	for domain := range routes {
+		domains = append(domains, domain)
+	}
+	sort.Strings(domains)
+	return domains
 }
 
 // fetchRoutes consulta o endpoint de descoberta de um peer.

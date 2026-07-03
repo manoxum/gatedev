@@ -18,7 +18,7 @@ const (
 	defaultPeerScanPort       = "8531"
 	peerScanRequestTimeout    = 700 * time.Millisecond
 	peerScanOverallTimeout    = 8 * time.Second
-	peerScanMaxCandidates     = 512
+	peerScanMaxCandidates     = 768
 	peerScanConcurrentWorkers = 64
 )
 
@@ -210,14 +210,14 @@ func ipv4NetworkFromAddr(addr net.Addr) (net.IP, *net.IPNet, bool) {
 }
 
 func boundedIPv4Hosts(localIP net.IP, network *net.IPNet) []string {
-	prefix, bits := network.Mask.Size()
+	localIP = localIP.To4()
+	if localIP == nil {
+		return nil
+	}
+	_, bits := network.Mask.Size()
 	if bits != 32 {
 		return nil
 	}
-	if prefix < 24 {
-		network = &net.IPNet{IP: net.IPv4(localIP[0], localIP[1], localIP[2], 0), Mask: net.CIDRMask(24, 32)}
-	}
-
 	start := ipv4ToUint32(network.IP.To4())
 	mask := ipv4ToUint32(net.IP(network.Mask).To4())
 	first := (start & mask) + 1
@@ -225,10 +225,44 @@ func boundedIPv4Hosts(localIP net.IP, network *net.IPNet) []string {
 	if last < first {
 		return nil
 	}
+	if total := last - first + 1; total <= peerScanMaxCandidates {
+		var hosts []string
+		for value := first; value <= last; value++ {
+			hosts = append(hosts, uint32ToIPv4(value).String())
+		}
+		return hosts
+	}
 
 	var hosts []string
-	for value := first; value <= last && len(hosts) < peerScanMaxCandidates; value++ {
+	add := func(value uint32) {
+		if value < first || value > last || len(hosts) >= peerScanMaxCandidates {
+			return
+		}
 		hosts = append(hosts, uint32ToIPv4(value).String())
+	}
+
+	local := ipv4ToUint32(localIP)
+	local24 := &net.IPNet{IP: net.IPv4(localIP[0], localIP[1], localIP[2], 0), Mask: net.CIDRMask(24, 32)}
+	local24Start := ipv4ToUint32(local24.IP.To4())
+	local24Mask := ipv4ToUint32(net.IP(local24.Mask).To4())
+	local24First := (local24Start & local24Mask) + 1
+	local24Last := (local24Start | ^local24Mask) - 1
+	for value := local24First; value <= local24Last && len(hosts) < peerScanMaxCandidates; value++ {
+		add(value)
+	}
+	for step := uint32(1); len(hosts) < peerScanMaxCandidates; step++ {
+		progressed := false
+		if local >= step && local-step >= first {
+			add(local - step)
+			progressed = true
+		}
+		if local+step >= local && local+step <= last {
+			add(local + step)
+			progressed = true
+		}
+		if !progressed {
+			break
+		}
 	}
 	return hosts
 }

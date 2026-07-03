@@ -9,9 +9,21 @@ import (
 
 func getenv(name, fallback string) string {
 	if value := os.Getenv(name); value != "" {
-		return value
+		return normalizeEnvValue(value)
 	}
 	return fallback
+}
+
+func normalizeEnvValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if len(trimmed) < 2 {
+		return trimmed
+	}
+	if (strings.HasPrefix(trimmed, `"`) && strings.HasSuffix(trimmed, `"`)) ||
+		(strings.HasPrefix(trimmed, `'`) && strings.HasSuffix(trimmed, `'`)) {
+		return strings.Trim(trimmed, `"'`)
+	}
+	return trimmed
 }
 
 // parseTLDs segue as mesmas regras do antigo docker-entrypoint.sh:

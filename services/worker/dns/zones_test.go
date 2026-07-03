@@ -88,3 +88,17 @@ func TestOwnRoutesAdvertisesConcreteDomainZones(t *testing.T) {
 		t.Fatalf("ownRoutes advertised broad mesh root bnet")
 	}
 }
+
+func TestRouteDomainsUsesOwnedRoutes(t *testing.T) {
+	cfg := &dnsConfig{
+		domainZones: map[string]bool{"costa.bnet": true, "bnet": true},
+		nginxHosts:  map[string]bool{"test.costa.bnet": true},
+		nginxZones:  map[string]bool{},
+		nodeName:    "Daniel Costa",
+	}
+
+	domains := routeDomains(ownRoutes(cfg))
+	if len(domains) != 2 || domains[0] != "costa.bnet" || domains[1] != "test.costa.bnet" {
+		t.Fatalf("routeDomains(ownRoutes) = %v, want [costa.bnet test.costa.bnet]", domains)
+	}
+}

@@ -53,6 +53,9 @@ func discoverHostSourceIPs(raw string, exclude ...string) ([]string, error) {
 			excluded[ip] = true
 		}
 	}
+	if strings.TrimSpace(raw) == "" {
+		return discoverLANIPs(excluded)
+	}
 
 	seen := map[string]bool{}
 	var ips []string
@@ -70,6 +73,34 @@ func discoverHostSourceIPs(raw string, exclude ...string) ([]string, error) {
 		}
 		seen[ip] = true
 		ips = append(ips, ip)
+	}
+	sort.Strings(ips)
+	return ips, nil
+}
+
+func discoverLANIPs(excluded map[string]bool) ([]string, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var ips []string
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || isIgnoredLANInterface(iface.Name) {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ip := ipv4FromAddr(addr)
+			if ip == "" || excluded[ip] || seen[ip] {
+				continue
+			}
+			seen[ip] = true
+			ips = append(ips, ip)
+		}
 	}
 	sort.Strings(ips)
 	return ips, nil
@@ -96,6 +127,18 @@ func parseHostSourceIP(value string) (string, error) {
 
 func isDockerBridgeName(name string) bool {
 	return name == "docker0" || strings.HasPrefix(name, "br-")
+}
+
+func isIgnoredLANInterface(name string) bool {
+	if name == "lo" || name == "ap0" || isDockerBridgeName(name) {
+		return true
+	}
+	for _, prefix := range []string{"veth", "virbr", "tun", "tap", "wg", "bn-"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func ipv4FromAddr(addr net.Addr) string {

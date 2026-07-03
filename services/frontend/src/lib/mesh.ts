@@ -115,6 +115,11 @@ function isLocalRoute(route: DiscoverRoute, localName: string, localFingerprint?
   return route.owner === localName || route.source === "self";
 }
 
+export function remoteRoutes(data: MeshData) {
+  const localName = data.localNode.nodeName || data.config.DISCOVER_NODE_NAME || "este-servidor";
+  return data.routes.filter((route) => !isLocalRoute(route, localName, data.localNode.fingerprint));
+}
+
 export function buildNodes(
   config: Record<string, string>,
   peers: DiscoveredPeer[],
@@ -289,7 +294,7 @@ export function neighborRows(node: BindnetNode, data: MeshData) {
 export function metricCards(node: BindnetNode, data: MeshData) {
   const services = serviceRowsForNode(node, data).length;
   const neighbors = neighborRows(node, data).length;
-  const routed = node.kind === "direct" ? routesViaNode(node, data.routes).length : data.routes.length;
+  const routed = node.kind === "direct" ? routesViaNode(node, data.routes).length : remoteRoutes(data).length;
   return [
     { label: "Serviços", value: services, icon: Globe2 },
     { label: "Vizinhos", value: neighbors, icon: Network },
