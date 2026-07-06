@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import { RequireAuth } from "@/components/RequireAuth";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/Login";
+import { SetupPage } from "@/pages/Setup";
 import { DashboardPage } from "@/pages/Dashboard";
 import { HotspotPage } from "@/pages/Hotspot";
 import { HotspotDeviceDetailPage } from "@/pages/HotspotDeviceDetail";
@@ -14,6 +15,14 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/setup"
+        element={
+          <RequireAuth>
+            <SetupPage />
+          </RequireAuth>
+        }
+      />
       <Route
         element={
           <RequireAuth>

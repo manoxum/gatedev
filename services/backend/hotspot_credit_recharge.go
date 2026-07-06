@@ -1,9 +1,58 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"time"
 )
+
+// applyManualRecharge soma o valor ao saldo (respeitando o plafond, se
+// houver) e desbloqueia ao vivo se o dispositivo estava bloqueado por
+// falta de credito e o saldo voltou a ficar positivo. O teto/plafond so
+// e ajustado pelo formulario de configuracao (upsertDeviceCreditConfig),
+// nunca pela recarga - aqui o valor enviado e sempre um incremento.
+func applyManualRecharge(ctx context.Context, db *sql.DB, worker *workerClient, mac string, amountBytes int64) (hotspotDeviceCredit, error) {
+	if _, err := ensureDeviceCreditRow(db, mac); err != nil {
+		return hotspotDeviceCredit{}, err
+	}
+	var credit hotspotDeviceCredit
+	err := db.QueryRow(`
+		UPDATE hotspot_device_credit
+		SET balance_bytes = CASE
+		        WHEN plafond_bytes IS NOT NULL THEN LEAST(balance_bytes + $2, plafond_bytes)
+		        ELSE balance_bytes + $2
+		    END,
+		    updated_at = CURRENT_TIMESTAMP
+		WHERE mac_address = $1
+		RETURNING mac_address, enabled, balance_bytes, recharge_amount_bytes, recharge_period,
+		          plafond_bytes, next_recharge_at, blocked_by_credit
+	`, mac, amountBytes).Scan(&credit.MACAddress, &credit.Enabled, &credit.BalanceBytes, &credit.RechargeAmountBytes,
+		&credit.RechargePeriod, &credit.PlafondBytes, &credit.NextRechargeAt, &credit.BlockedByCredit)
+	if err != nil {
+		return hotspotDeviceCredit{}, err
+	}
+	if err := recordCreditHistory(db, mac, "manual_recharge", amountBytes, credit.BalanceBytes); err != nil {
+		return hotspotDeviceCredit{}, err
+	}
+	if credit.BlockedByCredit && credit.BalanceBytes > 0 {
+		if err := unblockDeviceForCredit(db, mac); err != nil {
+			return credit, err
+		}
+		credit.BlockedByCredit = false
+		applyLiveCreditBlock(ctx, db, worker, mac, "", false)
+	}
+	return credit, nil
+}
+
+func unblockDeviceForCredit(db *sql.DB, mac string) error {
+	_, err := db.Exec(`UPDATE hotspot_device_credit SET blocked_by_credit = false, updated_at = CURRENT_TIMESTAMP WHERE mac_address = $1`, mac)
+	return err
+}
+
+func blockDeviceForCredit(db *sql.DB, mac string) error {
+	_, err := db.Exec(`UPDATE hotspot_device_credit SET blocked_by_credit = true, updated_at = CURRENT_TIMESTAMP WHERE mac_address = $1`, mac)
+	return err
+}
 
 // upsertDeviceCreditConfig grava a config de recarga. next_recharge_at
 // so e recalculado (ancorado a partir de agora) quando o periodo muda
@@ -112,7 +161,8 @@ func applyAutomaticRecharges(db *sql.DB) error {
 }
 
 func advanceDeviceRecharge(db *sql.DB, mac string) error {
-	_, err := db.Exec(`
+	var balanceBytes, rechargeAmountBytes int64
+	err := db.QueryRow(`
 		UPDATE hotspot_device_credit
 		SET balance_bytes = CASE
 		        WHEN plafond_bytes IS NOT NULL THEN LEAST(balance_bytes + COALESCE(recharge_amount_bytes, 0), plafond_bytes)
@@ -127,6 +177,16 @@ func advanceDeviceRecharge(db *sql.DB, mac string) error {
 		    ),
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE mac_address = $1 AND next_recharge_at <= CURRENT_TIMESTAMP
-	`, mac)
-	return err
+		RETURNING balance_bytes, COALESCE(recharge_amount_bytes, 0)
+	`, mac).Scan(&balanceBytes, &rechargeAmountBytes)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if rechargeAmountBytes <= 0 {
+		return nil
+	}
+	return recordCreditHistory(db, mac, "auto_recharge", rechargeAmountBytes, balanceBytes)
 }

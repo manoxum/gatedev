@@ -28,8 +28,6 @@ services:
     volumes:
       - nginx_config:/nginx-config:ro
     depends_on:
-      hotspot:
-        condition: service_started
       postgres:
         condition: service_healthy
       redis:
@@ -96,6 +94,8 @@ services:
       MONGO_DB: ${MONGO_DB:-bindnet}
       MONGO_HOST: mongo
       MONGO_PORT: "27017"
+      MINIO_HOST: minio
+      MINIO_PORT: "9000"
       CA_COMMON_NAME: ${CA_COMMON_NAME:-Bindnet Local Development CA}
       BINDNET_OUI_DB_PATH: ${BINDNET_OUI_DB_PATH:-/usr/local/share/bindnet/oui.csv}
       NGINX_UI_URL: ${NGINX_UI_URL:-http://nginx-ui:9000}

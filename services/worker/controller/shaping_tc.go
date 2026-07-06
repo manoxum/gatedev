@@ -28,11 +28,11 @@ func ensureRootQdisc(iface string) error {
 		return fmt.Errorf("qdisc raiz em %s: %w", iface, err)
 	}
 	if err := runTC("class", "replace", "dev", iface, "parent", "1:", "classid", "1:1",
-		"htb", "rate", mbit(noLimitCeilMbps), "ceil", mbit(noLimitCeilMbps)); err != nil {
+		"htb", "rate", rate(noLimitCeilMbps, rateUnitMbit), "ceil", rate(noLimitCeilMbps, rateUnitMbit)); err != nil {
 		return fmt.Errorf("classe pai 1:1 em %s: %w", iface, err)
 	}
 	if err := runTC("class", "replace", "dev", iface, "parent", "1:1", "classid", "1:999",
-		"htb", "rate", mbit(minGuaranteedMbps), "ceil", mbit(noLimitCeilMbps)); err != nil {
+		"htb", "rate", rate(minGuaranteedMbps, rateUnitMbit), "ceil", rate(noLimitCeilMbps, rateUnitMbit)); err != nil {
 		return fmt.Errorf("classe default 1:999 em %s: %w", iface, err)
 	}
 	return nil
@@ -41,12 +41,12 @@ func ensureRootQdisc(iface string) error {
 // updateRootCeil atualiza so o teto da classe pai 1:1 (limite global)
 // sem recriar qdisc/classe default - chamado sempre que o admin muda o
 // limite global, ou com noLimitCeilMbps quando ele remove o limite.
-func updateRootCeil(iface string, ceilMbps int) error {
-	if ceilMbps <= 0 {
-		ceilMbps = noLimitCeilMbps
+func updateRootCeil(iface string, ceilValue int, ceilUnit string) error {
+	if ceilValue <= 0 || ceilUnit == "" {
+		ceilValue, ceilUnit = noLimitCeilMbps, rateUnitMbit
 	}
 	if err := runTC("class", "replace", "dev", iface, "parent", "1:", "classid", "1:1",
-		"htb", "rate", mbit(ceilMbps), "ceil", mbit(ceilMbps)); err != nil {
+		"htb", "rate", rate(ceilValue, ceilUnit), "ceil", rate(ceilValue, ceilUnit)); err != nil {
 		return fmt.Errorf("atualizar teto global em %s: %w", iface, err)
 	}
 	return nil
@@ -55,10 +55,10 @@ func updateRootCeil(iface string, ceilMbps int) error {
 // ensureDeviceClass cria/atualiza a classe HTB dedicada de um
 // dispositivo (classid = fwmark, sempre dentro de 1:1) e o filtro que
 // classifica pacotes marcados com esse fwmark nela.
-func ensureDeviceClass(iface string, fwmark, rateMbps int) error {
+func ensureDeviceClass(iface string, fwmark, rateValue int, rateUnitValue string) error {
 	classID := fmt.Sprintf("1:%d", fwmark)
 	if err := runTC("class", "replace", "dev", iface, "parent", "1:1", "classid", classID,
-		"htb", "rate", mbit(minGuaranteedMbps), "ceil", mbit(rateMbps)); err != nil {
+		"htb", "rate", rate(minGuaranteedMbps, rateUnitMbit), "ceil", rate(rateValue, rateUnitValue)); err != nil {
 		return fmt.Errorf("classe %s em %s: %w", classID, iface, err)
 	}
 	if err := runTC("filter", "replace", "dev", iface, "parent", "1:", "protocol", "ip", "pref", "1",
@@ -84,8 +84,34 @@ func teardownRootQdisc(iface string) {
 	_ = runTC("qdisc", "del", "dev", iface, "root")
 }
 
-func mbit(mbps int) string {
-	return strconv.Itoa(mbps) + "mbit"
+// rateUnitMbit e o default usado internamente (teto nominal
+// noLimitCeilMbps, rate minimo garantido) - nao vem do admin, entao
+// nao precisa das outras 5 unidades que a API aceita.
+const rateUnitMbit = "mbit"
+
+// tcRateSuffix traduz a unidade da API (kbit/mbit/gbit em bits/s,
+// kbyte/mbyte/gbyte em bytes/s) para o sufixo que o tc entende - tc
+// usa kbit/mbit/gbit para bits/s e kbps/mbps/gbps (nome confuso, mas e
+// assim que a ferramenta distingue) para bytes/s.
+func tcRateSuffix(unit string) string {
+	switch unit {
+	case "kbyte":
+		return "kbps"
+	case "mbyte":
+		return "mbps"
+	case "gbyte":
+		return "gbps"
+	case "kbit", "gbit":
+		return unit
+	default:
+		return "mbit"
+	}
+}
+
+// rate monta o argumento de taxa do tc (ex.: "100mbit", "500kbps") a
+// partir do valor digitado pelo admin e da unidade escolhida na UI.
+func rate(value int, unit string) string {
+	return strconv.Itoa(value) + tcRateSuffix(unit)
 }
 
 func runTC(args ...string) error {

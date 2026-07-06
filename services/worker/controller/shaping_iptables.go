@@ -37,7 +37,7 @@ func ensureDeviceMarkRules(apIface, uplinkIface, mac, ip string, fwmark int) err
 	upComment := "bn-up-" + mac
 	markHex := "0x" + strconv.FormatInt(int64(fwmark), 16)
 	if !deviceUploadRuleMatches(apIface, uplinkIface, mac, upComment, markHex) {
-		deleteRulesByComment(upComment)
+		deleteRulesByComment("mangle", shapingChain, upComment)
 	}
 	if err := iptablesCheck("-t", "mangle", "-C", shapingChain,
 		"-i", apIface, "-o", uplinkIface, "-m", "mac", "--mac-source", mac,
@@ -69,7 +69,7 @@ func refreshDeviceIP(apIface, uplinkIface, mac, ip string, fwmark int) error {
 	downComment := "bn-down-" + mac
 	markHex := "0x" + strconv.FormatInt(int64(fwmark), 16)
 	if net.ParseIP(strings.TrimSpace(ip)) == nil {
-		deleteRulesByComment(downComment)
+		deleteRulesByComment("mangle", shapingChain, downComment)
 		return nil
 	}
 	if err := iptablesCheck("-t", "mangle", "-C", shapingChain,
@@ -77,7 +77,7 @@ func refreshDeviceIP(apIface, uplinkIface, mac, ip string, fwmark int) error {
 		"-m", "comment", "--comment", downComment, "-j", "MARK", "--set-mark", markHex); err == nil {
 		return nil
 	}
-	deleteRulesByComment(downComment)
+	deleteRulesByComment("mangle", shapingChain, downComment)
 	if err := runIptables("-t", "mangle", "-A", shapingChain,
 		"-i", uplinkIface, "-o", apIface, "-d", ip,
 		"-m", "comment", "--comment", downComment, "-j", "MARK", "--set-mark", markHex); err != nil {
@@ -103,7 +103,7 @@ func applyGlobalMarkRules(apIface, uplinkIface string) error {
 func ensureGlobalCounterRule(inIface, outIface, comment string) error {
 	deleteRulesByCommentTarget(comment, "RETURN")
 	if !globalCounterRuleMatches(inIface, outIface, comment) {
-		deleteRulesByComment(comment)
+		deleteRulesByComment("mangle", shapingChain, comment)
 	}
 	if err := iptablesCheck("-t", "mangle", "-C", shapingChain,
 		"-i", inIface, "-o", outIface, "-m", "comment", "--comment", comment); err != nil {
@@ -159,93 +159,12 @@ func readCommentCounters(downComment, upComment string) (downloadBytes, uploadBy
 // dispositivo, best-effort (chamado quando o limite/rastreamento de um
 // dispositivo e removido).
 func removeDeviceMarkRules(mac string) {
-	deleteRulesByComment("bn-up-" + mac)
-	deleteRulesByComment("bn-down-" + mac)
-}
-
-// deleteRulesByComment apaga, em loop, toda regra do shapingChain que
-// contenha o comentario informado - mesmo padrao de
-// remove_iptables_jump em interfaces.sh (repete ate o -D falhar).
-func deleteRulesByComment(comment string) {
-	output, err := exec.Command("iptables", "-w", "-t", "mangle", "-L", shapingChain, "--line-numbers", "-n").CombinedOutput()
-	if err != nil {
-		return
-	}
-	for {
-		lineNumber := findRuleLineByComment(string(output), comment)
-		if lineNumber == "" {
-			return
-		}
-		if err := runIptables("-t", "mangle", "-D", shapingChain, lineNumber); err != nil {
-			return
-		}
-		output, err = exec.Command("iptables", "-w", "-t", "mangle", "-L", shapingChain, "--line-numbers", "-n").CombinedOutput()
-		if err != nil {
-			return
-		}
-	}
-}
-
-func deleteRulesByCommentTarget(comment, target string) {
-	output, err := exec.Command("iptables", "-w", "-t", "mangle", "-L", shapingChain, "--line-numbers", "-n").CombinedOutput()
-	if err != nil {
-		return
-	}
-	for {
-		lineNumber := findRuleLineByCommentTarget(string(output), comment, target)
-		if lineNumber == "" {
-			return
-		}
-		if err := runIptables("-t", "mangle", "-D", shapingChain, lineNumber); err != nil {
-			return
-		}
-		output, err = exec.Command("iptables", "-w", "-t", "mangle", "-L", shapingChain, "--line-numbers", "-n").CombinedOutput()
-		if err != nil {
-			return
-		}
-	}
-}
-
-func findRuleLineByComment(listing, comment string) string {
-	for _, line := range strings.Split(listing, "\n") {
-		if strings.Contains(line, "/* "+comment+" */") {
-			fields := strings.Fields(line)
-			if len(fields) > 0 {
-				return fields[0]
-			}
-		}
-	}
-	return ""
-}
-
-func findRuleLineByCommentTarget(listing, comment, target string) string {
-	for _, line := range strings.Split(listing, "\n") {
-		if !strings.Contains(line, "/* "+comment+" */") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) > 1 && fields[1] == target {
-			return fields[0]
-		}
-	}
-	return ""
+	deleteRulesByComment("mangle", shapingChain, "bn-up-"+mac)
+	deleteRulesByComment("mangle", shapingChain, "bn-down-"+mac)
 }
 
 // flushShapingChain limpa todas as regras (best-effort, chamado no
 // teardown quando o hotspot para).
 func flushShapingChain() {
 	_ = runIptables("-t", "mangle", "-F", shapingChain)
-}
-
-func runIptables(args ...string) error {
-	output, err := exec.Command("iptables", append([]string{"-w"}, args...)...).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
-	}
-	return nil
-}
-
-func iptablesCheck(args ...string) error {
-	_, err := exec.Command("iptables", append([]string{"-w"}, args...)...).CombinedOutput()
-	return err
 }

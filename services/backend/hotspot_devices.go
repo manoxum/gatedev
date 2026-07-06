@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -25,6 +26,7 @@ type hotspotClientResponse struct {
 	DeviceName string `json:"deviceName,omitempty"`
 	OSName     string `json:"osName,omitempty"`
 	Confidence int    `json:"confidence,omitempty"`
+	Alias      string `json:"alias,omitempty"`
 	Blocked    bool   `json:"blocked"`
 }
 
@@ -34,6 +36,7 @@ type hotspotDeviceInfo struct {
 	DeviceName sql.NullString
 	OSName     sql.NullString
 	Confidence sql.NullInt64
+	Alias      sql.NullString
 }
 
 type hotspotFingerprintResponse struct {
@@ -57,6 +60,8 @@ func registerHotspotDeviceRoutes(mux *http.ServeMux, admin *administrator, db *s
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, false))
 	}))
+
+	registerHotspotDeviceIdentityRoute(mux, admin, db)
 }
 
 func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClient) ([]hotspotClientResponse, error) {
@@ -88,6 +93,9 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 		if err != nil {
 			mac = strings.ToLower(strings.TrimSpace(client.MAC))
 		}
+		if err := recordDeviceSeen(db, mac); err != nil {
+			log.Printf("[backend] falha ao registrar %s como visto: %v", mac, err)
+		}
 		enriched := infoToClientFields(mac, info[mac], blocked[mac] || blockedByCredit[mac])
 		enriched.IP = client.IP
 		enriched.Hostname = client.Hostname
@@ -109,6 +117,9 @@ func infoToClientFields(mac string, info hotspotDeviceInfo, blocked bool) hotspo
 	}
 	if info.Confidence.Valid {
 		client.Confidence = int(info.Confidence.Int64)
+	}
+	if info.Alias.Valid {
+		client.Alias = info.Alias.String
 	}
 	return client
 }

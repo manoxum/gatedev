@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ShieldCheck, ShieldX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -108,8 +109,14 @@ export function CertificatesPage() {
         <CardContent>
           <Tabs defaultValue="issued">
             <TabsList>
-              <TabsTrigger value="issued">Emitidos ({certificates.data?.length ?? 0})</TabsTrigger>
-              <TabsTrigger value="revoked">Revogados ({revokedCertificates.data?.length ?? 0})</TabsTrigger>
+              <TabsTrigger value="issued">
+                <ShieldCheck className="h-4 w-4" />
+                Emitidos ({certificates.data?.length ?? 0})
+              </TabsTrigger>
+              <TabsTrigger value="revoked">
+                <ShieldX className="h-4 w-4" />
+                Revogados ({revokedCertificates.data?.length ?? 0})
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="issued">
               <CertificateList

@@ -3,10 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,37 +13,25 @@ import (
 const composeProjectName = "bindnet"
 
 func registerComposeRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /hotspot/apply", handleHotspotServiceAction("restart", true))
-	mux.HandleFunc("POST /hotspot/start", handleHotspotServiceAction("start", true))
-	mux.HandleFunc("POST /hotspot/stop", handleHotspotServiceAction("stop", false))
+	mux.HandleFunc("POST /hotspot/apply", handleHotspotServiceAction("restart"))
+	mux.HandleFunc("POST /hotspot/start", handleHotspotServiceAction("start"))
+	mux.HandleFunc("POST /hotspot/stop", handleHotspotServiceAction("stop"))
 	mux.HandleFunc("GET /hotspot/status", handleHotspotServiceStatus)
-	mux.HandleFunc("POST /dns/apply", handleApplyServices([]string{"dns-provider"}, true))
+	mux.HandleFunc("POST /dns/apply", handleApplyServices([]string{"dns-provider"}))
 }
 
-func handleHotspotServiceAction(action string, acceptsRuntimeConfig bool) http.HandlerFunc {
+func handleHotspotServiceAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var config map[string]string
-		if acceptsRuntimeConfig {
-			var err error
-			config, err = decodeRuntimeConfig(r)
-			if err != nil {
-				http.Error(w, "corpo invalido", http.StatusBadRequest)
-				return
-			}
-		}
-
 		if action != "stop" {
 			if err := ensureHotspotContainer(); err != nil {
 				log.Printf("[worker] erro ao garantir container do hotspot: %v", err)
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
-			if len(config) > 0 {
-				if err := applyComposeServicesWithConfig([]string{"dns-provider"}, config); err != nil {
-					log.Printf("[worker] erro ao aplicar config do dns-provider: %v", err)
-					http.Error(w, err.Error(), http.StatusBadGateway)
-					return
-				}
+			if err := applyComposeServices([]string{"dns-provider"}); err != nil {
+				log.Printf("[worker] erro ao reiniciar dns-provider: %v", err)
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
 			}
 		}
 
@@ -73,17 +59,6 @@ func handleHotspotServiceStatus(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	_, _ = w.Write(output)
-}
-
-func decodeRuntimeConfig(r *http.Request) (map[string]string, error) {
-	if r.Body == nil || r.ContentLength == 0 {
-		return nil, nil
-	}
-	var config map[string]string
-	if err := json.NewDecoder(r.Body).Decode(&config); err != nil && err != io.EOF {
-		return nil, err
-	}
-	return config, nil
 }
 
 func ensureHotspotContainer() error {
@@ -127,14 +102,8 @@ func serviceContainerRunning(service string) (string, bool, error) {
 	return containerID, strings.TrimSpace(string(output)) == "true", nil
 }
 
-func applyComposeServicesWithConfig(services []string, config map[string]string) error {
-	file, err := writeDNSRuntimeComposeOverride(config)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(file)
-
-	args := composeArgsWithFiles([]string{file}, append([]string{"up", "-d", "--no-build", "--no-deps"}, services...)...)
+func applyComposeServices(services []string) error {
+	args := composeArgs(append([]string{"up", "-d", "--no-build", "--no-deps"}, services...)...)
 	output, err := exec.Command("docker", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %w", strings.TrimSpace(string(output)), err)
@@ -143,37 +112,13 @@ func applyComposeServicesWithConfig(services []string, config map[string]string)
 }
 
 // handleApplyServices recria os containers informados via "docker
-// compose up", unica forma de fazer um container ja existente receber
-// o ambiente gerado a partir da configuracao salva pelo painel.
-// --no-build evita reconstruir a imagem, so recria o container.
-func handleApplyServices(services []string, acceptsRuntimeConfig bool) http.HandlerFunc {
+// compose up". Os servicos leem a configuracao operacional diretamente
+// do banco quando iniciam; o worker nao transporta WIFI_/HOTSPOT_ por env.
+func handleApplyServices(services []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var extraFiles []string
-		var cleanup func()
-		if acceptsRuntimeConfig && r.Body != nil && r.ContentLength != 0 {
-			var config map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&config); err != nil && err != io.EOF {
-				http.Error(w, "corpo invalido", http.StatusBadRequest)
-				return
-			}
-			if len(config) > 0 {
-				file, err := writeDNSRuntimeComposeOverride(config)
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-					return
-				}
-				extraFiles = append(extraFiles, file)
-				cleanup = func() { _ = os.Remove(file) }
-			}
-		}
-		if cleanup != nil {
-			defer cleanup()
-		}
-		args := composeArgsWithFiles(extraFiles, append([]string{"up", "-d", "--no-build", "--no-deps"}, services...)...)
-		output, err := exec.Command("docker", args...).CombinedOutput()
-		if err != nil {
-			log.Printf("[worker] erro ao aplicar config (%v): %v (%s)", services, err, output)
-			http.Error(w, string(output), http.StatusBadGateway)
+		if err := applyComposeServices(services); err != nil {
+			log.Printf("[worker] erro ao aplicar config (%v): %v", services, err)
+			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -196,44 +141,6 @@ func composeArgsWithFiles(extraFiles []string, args ...string) []string {
 		base = append(base, "-f", file)
 	}
 	return append(base, args...)
-}
-
-func writeDNSRuntimeComposeOverride(config map[string]string) (string, error) {
-	file, err := os.CreateTemp("", "bindnet-hotspot-runtime-*.yml")
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	var b strings.Builder
-	b.WriteString("services:\n")
-	b.WriteString("  dns-provider:\n    environment:\n")
-	for _, key := range dnsProviderRuntimeEnvKeys() {
-		value, ok := config[key]
-		if !ok {
-			continue
-		}
-		quoted, err := json.Marshal(value)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString("      ")
-		b.WriteString(key)
-		b.WriteString(": ")
-		b.Write(quoted)
-		b.WriteByte('\n')
-	}
-
-	if _, err := file.WriteString(b.String()); err != nil {
-		return "", err
-	}
-	return file.Name(), nil
-}
-
-func dnsProviderRuntimeEnvKeys() []string {
-	return []string{
-		"HOTSPOT_GATEWAY",
-	}
 }
 
 func composeServiceContainerID(service string) (string, error) {

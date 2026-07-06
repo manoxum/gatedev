@@ -207,6 +207,19 @@ scripts tinham, só que dentro do container privilegiado em vez de
   fluxo suportado é iniciar/parar pelo painel; "Recuperar Wi-Fi" fica
   como ação segura para limpar estados antigos ou interrupções fora do
   fluxo normal.
+- `POST /api/hotspot/start`/`stop` também gravam a última intenção do
+  admin (chave interna `_DESIRED_STATE` em `hotspot_config`, fora da
+  allowlist de `GET`/`PATCH /api/hotspot/config` — ver
+  `hotspotDesiredStateKey` em `services/backend/hotspot_config_store.go`).
+  Ao subir, o backend chama `autoStartHotspotOnBoot`
+  (`services/backend/hotspot_autostart.go`, goroutine iniciada em
+  `main.go`): se a última intenção foi "ligado" e o hotspot não está
+  rodando, ele religa sozinho (com retry curto, já que o
+  worker/container do hotspot podem demorar a ficar prontos logo após
+  o backend subir) — sem isso, o container do hotspot sempre volta em
+  modo "manager" (ocioso) após qualquer restart do container/reboot da
+  máquina, exigindo clique manual do admin mesmo que o hotspot
+  estivesse ligado antes.
 
 ## Clientes do hotspot: identificação e bloqueio por MAC (`services/backend/hotspot_devices.go`)
 
@@ -235,6 +248,17 @@ scripts tinham, só que dentro do container privilegiado em vez de
      confiança (`confidence`), não uma identificação garantida.
   4. Resultado fica em cache (`hotspot_device_info`, por MAC) até o
      operador pedir de novo.
+- `PATCH /api/hotspot/devices/{mac}/identity`
+  (`services/backend/hotspot_device_identity.go`) grava edição manual
+  de `alias`/`vendor`/`deviceName`/`osName` na mesma tabela
+  `hotspot_device_info` — campo ausente no corpo do PATCH preserva o
+  valor atual (permite editar só o alias na aba de visão geral, ou os
+  quatro campos juntos no modal "Identificar" da lista de clientes,
+  sem um sobrescrever o outro). Editar manualmente marca
+  `confidence = 100` (sinaliza "definido a mão", distinto da heurística
+  de `POST .../identify`). `alias` é único (`UNIQUE` em
+  `hotspot_device_info.alias`, nulo permitido e não contável para a
+  constraint) — conflito devolve 409.
 - `GET/POST /api/hotspot/blocklist` e `DELETE
   /api/hotspot/blocklist/{mac}` gerenciam a tabela
   `hotspot_blocked_devices`. Bloquear/desbloquear tem efeito imediato
@@ -399,6 +423,16 @@ Regras:
   ou um gateway Docker ausente torne o nó inteiro "invisível" para busca
   de peers — antes, essa mesma espera derrubava o processo inteiro
   (`log.Fatalf`) antes do servidor de descoberta sequer subir.
+- `dns-provider` não tem (nem deveria ter) `depends_on: hotspot` no
+  `docker-compose.services.yml`: ele já sobe/funciona de forma
+  independente do container `hotspot` existir ou estar rodando (ver
+  espera assíncrona/não-fatal descrita acima) — a única leitura
+  relacionada a hotspot é `HOTSPOT_GATEWAY` no Postgres (config
+  estática, com fallback), nunca uma chamada ao container `hotspot`
+  em si. `depends_on: hotspot: condition: service_started` (sem
+  healthcheck) era só ordenação de criação de container no Compose,
+  sem efeito funcional real, e foi removido para não sugerir um
+  acoplamento que não existe no código.
 - `dns-provider` roda com `network_mode: host` (precisa bindar IPs
   reais do host) e por isso **não enxerga a DNS interna do Docker**
   para resolver `postgres`/`redis` pelo nome do serviço — fala com

@@ -42,47 +42,66 @@ func liveHotspotClientIP(ctx context.Context, worker *workerClient, iface, mac s
 	return "", false
 }
 
-// effectiveDeviceRates decide a taxa Mbps que deve valer agora: a
-// configurada, ou a de throttle se a cota do periodo ja estourou, ou
-// nil (sem classe HTB dedicada, so contagem) se nao houver nenhuma.
-func effectiveDeviceRates(limits hotspotLimits, traffic hotspotDeviceTraffic) (downloadMbps, uploadMbps *int) {
-	if traffic.Throttled {
-		if limits.QuotaThrottleDownloadMbps != nil || limits.QuotaThrottleUploadMbps != nil {
-			return limits.QuotaThrottleDownloadMbps, limits.QuotaThrottleUploadMbps
-		}
-	}
-	return limits.DownloadRateMbps, limits.UploadRateMbps
+// rateLimit e um par valor+unidade de taxa, o shape que trafega do
+// Postgres ate o tc no worker sem normalizar pra uma unidade comum -
+// Value nil = sem limite (Unit e ignorada nesse caso).
+type rateLimit struct {
+	Value *int     `json:"value"`
+	Unit  rateUnit `json:"unit"`
 }
 
-func effectiveGlobalRates(limits hotspotLimits, traffic hotspotGlobalTraffic) (downloadMbps, uploadMbps *int) {
+// effectiveDeviceRates decide a taxa que deve valer agora: a
+// configurada, ou a de throttle se a cota do periodo ja estourou, ou
+// Value nil (sem classe HTB dedicada, so contagem) se nao houver
+// nenhuma.
+func effectiveDeviceRates(limits hotspotLimits, traffic hotspotDeviceTraffic) (download, upload rateLimit) {
 	if traffic.Throttled {
-		if limits.QuotaThrottleDownloadMbps != nil || limits.QuotaThrottleUploadMbps != nil {
-			return limits.QuotaThrottleDownloadMbps, limits.QuotaThrottleUploadMbps
+		if limits.QuotaThrottleDownloadValue != nil || limits.QuotaThrottleUploadValue != nil {
+			return rateLimit{limits.QuotaThrottleDownloadValue, limits.QuotaThrottleDownloadUnit},
+				rateLimit{limits.QuotaThrottleUploadValue, limits.QuotaThrottleUploadUnit}
 		}
 	}
-	return limits.DownloadRateMbps, limits.UploadRateMbps
+	return rateLimit{limits.DownloadRateValue, limits.DownloadRateUnit},
+		rateLimit{limits.UploadRateValue, limits.UploadRateUnit}
+}
+
+func effectiveGlobalRates(limits hotspotLimits, traffic hotspotGlobalTraffic) (download, upload rateLimit) {
+	if traffic.Throttled {
+		if limits.QuotaThrottleDownloadValue != nil || limits.QuotaThrottleUploadValue != nil {
+			return rateLimit{limits.QuotaThrottleDownloadValue, limits.QuotaThrottleDownloadUnit},
+				rateLimit{limits.QuotaThrottleUploadValue, limits.QuotaThrottleUploadUnit}
+		}
+	}
+	return rateLimit{limits.DownloadRateValue, limits.DownloadRateUnit},
+		rateLimit{limits.UploadRateValue, limits.UploadRateUnit}
 }
 
 type shapingGlobalPayload struct {
-	Interface    string `json:"interface"`
-	DownloadMbps *int   `json:"downloadMbps"`
-	UploadMbps   *int   `json:"uploadMbps"`
+	Interface         string   `json:"interface"`
+	DownloadRateValue *int     `json:"downloadRateValue"`
+	DownloadRateUnit  rateUnit `json:"downloadRateUnit"`
+	UploadRateValue   *int     `json:"uploadRateValue"`
+	UploadRateUnit    rateUnit `json:"uploadRateUnit"`
 }
 
 type shapingDevicePayload struct {
-	Interface    string `json:"interface"`
-	MAC          string `json:"mac"`
-	IP           string `json:"ip"`
-	Fwmark       int    `json:"fwmark"`
-	DownloadMbps *int   `json:"downloadMbps"`
-	UploadMbps   *int   `json:"uploadMbps"`
+	Interface         string   `json:"interface"`
+	MAC               string   `json:"mac"`
+	IP                string   `json:"ip"`
+	Fwmark            int      `json:"fwmark"`
+	DownloadRateValue *int     `json:"downloadRateValue"`
+	DownloadRateUnit  rateUnit `json:"downloadRateUnit"`
+	UploadRateValue   *int     `json:"uploadRateValue"`
+	UploadRateUnit    rateUnit `json:"uploadRateUnit"`
 }
 
-func applyGlobalShaping(ctx context.Context, worker *workerClient, iface string, downloadMbps, uploadMbps *int) error {
+func applyGlobalShaping(ctx context.Context, worker *workerClient, iface string, download, upload rateLimit) error {
 	return worker.call(ctx, http.MethodPost, "/hotspot/shaping/global", shapingGlobalPayload{
-		Interface:    iface,
-		DownloadMbps: downloadMbps,
-		UploadMbps:   uploadMbps,
+		Interface:         iface,
+		DownloadRateValue: download.Value,
+		DownloadRateUnit:  download.Unit,
+		UploadRateValue:   upload.Value,
+		UploadRateUnit:    upload.Unit,
 	}, nil)
 }
 
@@ -106,8 +125,8 @@ func applyGlobalShapingLive(ctx context.Context, db *sql.DB, worker *workerClien
 		log.Printf("[backend] limite global persistido, mas falha ao ler acumulado do periodo: %v", err)
 		return
 	}
-	downloadMbps, uploadMbps := effectiveGlobalRates(limits, traffic)
-	if err := applyGlobalShaping(ctx, worker, iface, downloadMbps, uploadMbps); err != nil {
+	download, upload := effectiveGlobalRates(limits, traffic)
+	if err := applyGlobalShaping(ctx, worker, iface, download, upload); err != nil {
 		log.Printf("[backend] limite global persistido, mas aplicacao ao vivo falhou: %v", err)
 	}
 }
@@ -130,14 +149,16 @@ func ensureDeviceShaping(ctx context.Context, db *sql.DB, worker *workerClient, 
 	if err != nil {
 		return err
 	}
-	downloadMbps, uploadMbps := effectiveDeviceRates(limits, traffic)
+	download, upload := effectiveDeviceRates(limits, traffic)
 	return worker.call(ctx, http.MethodPost, "/hotspot/shaping/device", shapingDevicePayload{
-		Interface:    iface,
-		MAC:          mac,
-		IP:           ip,
-		Fwmark:       fwmark,
-		DownloadMbps: downloadMbps,
-		UploadMbps:   uploadMbps,
+		Interface:         iface,
+		MAC:               mac,
+		IP:                ip,
+		Fwmark:            fwmark,
+		DownloadRateValue: download.Value,
+		DownloadRateUnit:  download.Unit,
+		UploadRateValue:   upload.Value,
+		UploadRateUnit:    upload.Unit,
 	}, nil)
 }
 
@@ -176,11 +197,11 @@ func reapplyHotspotShaping(ctx context.Context, db *sql.DB, worker *workerClient
 		log.Printf("[backend] falha ao ler acumulado global do hotspot: %v", err)
 		return
 	}
-	downloadMbps, uploadMbps := effectiveGlobalRates(limits, traffic)
+	download, upload := effectiveGlobalRates(limits, traffic)
 
 	var lastErr error
 	for attempt := 0; attempt < 6; attempt++ {
-		lastErr = applyGlobalShaping(ctx, worker, iface, downloadMbps, uploadMbps)
+		lastErr = applyGlobalShaping(ctx, worker, iface, download, upload)
 		if lastErr == nil {
 			break
 		}

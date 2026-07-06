@@ -49,7 +49,20 @@ func main() {
 		log.Printf("[dns-provider] server_name do nginx-ui descobertos: hosts=%v zonas=%v", zoneNames(nginxNames.hosts), zoneNames(nginxNames.zones))
 	}
 
-	hotspotGateway := getenv("HOTSPOT_GATEWAY", "192.168.12.1")
+	db, err := openPostgres()
+	if err != nil {
+		log.Fatalf("[dns-provider] erro ao conectar no Postgres: %v", err)
+	}
+	defer db.Close()
+
+	gatewayCtx, gatewayCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	hotspotGateway, err := loadHotspotGateway(gatewayCtx, db, "192.168.12.1")
+	gatewayCancel()
+	if err != nil {
+		log.Fatalf("[dns-provider] erro ao ler HOTSPOT_GATEWAY de hotspot_config: %v", err)
+	}
+	log.Printf("[dns-provider] gateway do hotspot carregado do banco: %s", hotspotGateway)
+
 	hostSourceIPs, err := discoverHostSourceIPs(os.Getenv("HOST_SOURCE_CIDR"), "127.0.0.1", hotspotGateway)
 	if err != nil {
 		log.Fatalf("[dns-provider] erro ao interpretar HOST_SOURCE_CIDR: %v", err)
@@ -79,12 +92,6 @@ func main() {
 			timeout = seconds
 		}
 	}
-
-	db, err := openPostgres()
-	if err != nil {
-		log.Fatalf("[dns-provider] erro ao conectar no Postgres: %v", err)
-	}
-	defer db.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	cache, err := openRedis(ctx)

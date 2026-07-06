@@ -60,3 +60,9 @@ func (a *auditClient) record(ctx context.Context, eventType, username string, de
 func (a *auditClient) disconnect(ctx context.Context) {
 	_ = a.client.Disconnect(ctx)
 }
+
+// ping verifica se a conexao com o Mongo continua saudavel - usado pelo
+// checklist de status do assistente de configuracao inicial.
+func (a *auditClient) ping(ctx context.Context) error {
+	return a.client.Ping(ctx, nil)
+}

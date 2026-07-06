@@ -8,7 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SelectNative } from "@/components/ui/select-native";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { bytesToGB, GIGABYTE } from "@/components/hotspot/hotspot-limits-types";
+import {
+  bytesToGB,
+  GIGABYTE,
+  quotaValueToBytes,
+  type RateUnit,
+} from "@/components/hotspot/hotspot-limits-types";
+import { RateUnitOptions } from "@/components/hotspot/RateUnitOptions";
 import { useDeviceCredit } from "@/components/hotspot/useHotspotQueries";
 import { useDeviceCreditMutations, type DeviceCreditConfig } from "@/components/hotspot/useHotspotCreditMutations";
 
@@ -27,7 +33,8 @@ type CreditConfigForm = z.infer<typeof creditConfigSchema>;
 
 export function DeviceCreditCard({ mac }: { mac: string }) {
   const [rechargeOpen, setRechargeOpen] = useState(false);
-  const [rechargeGB, setRechargeGB] = useState("");
+  const [rechargeValue, setRechargeValue] = useState("");
+  const [rechargeUnit, setRechargeUnit] = useState<RateUnit>("gbyte");
   const credit = useDeviceCredit(mac);
   const { saveConfig, recharge } = useDeviceCreditMutations(mac);
 
@@ -59,9 +66,9 @@ export function DeviceCreditCard({ mac }: { mac: string }) {
   }
 
   function onSubmitRecharge() {
-    const gb = Number(rechargeGB);
-    if (!gb || gb <= 0) return;
-    recharge.mutate(gb * GIGABYTE, { onSuccess: () => setRechargeOpen(false) });
+    const value = Number(rechargeValue);
+    if (!value || value <= 0) return;
+    recharge.mutate(quotaValueToBytes(value, rechargeUnit), { onSuccess: () => setRechargeOpen(false) });
   }
 
   return (
@@ -120,8 +127,18 @@ export function DeviceCreditCard({ mac }: { mac: string }) {
             <DialogTitle>Recarregar crédito</DialogTitle>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="rechargeGB">Quantidade (GB)</Label>
-            <Input id="rechargeGB" value={rechargeGB} onChange={(e) => setRechargeGB(e.target.value)} />
+            <Label htmlFor="rechargeValue">Quantidade a incrementar no saldo</Label>
+            <div className="flex gap-2">
+              <Input id="rechargeValue" value={rechargeValue} onChange={(e) => setRechargeValue(e.target.value)} />
+              <SelectNative
+                id="rechargeUnit"
+                className="w-24"
+                value={rechargeUnit}
+                onChange={(e) => setRechargeUnit(e.target.value as RateUnit)}
+              >
+                <RateUnitOptions />
+              </SelectNative>
+            </div>
           </div>
           <DialogFooter>
             <Button onClick={onSubmitRecharge} disabled={recharge.isPending}>

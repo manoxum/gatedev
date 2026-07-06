@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Ban, History, ScrollText, Sliders, Wifi } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { HotspotConfigForm } from "@/components/hotspot/HotspotConfigForm";
 import { HotspotBlocklistCard } from "@/components/hotspot/HotspotBlocklistCard";
 import { HotspotClientsCard } from "@/components/hotspot/HotspotClientsCard";
+import { HotspotKnownDevicesCard } from "@/components/hotspot/HotspotKnownDevicesCard";
 import { HotspotSummaryCard } from "@/components/hotspot/HotspotSummaryCard";
 import { GlobalLimitsCard } from "@/components/hotspot/GlobalLimitsCard";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
@@ -22,8 +24,8 @@ export function HotspotPage() {
   const [confirmRecoverOpen, setConfirmRecoverOpen] = useState(false);
   const autoPromptedRef = useRef(false);
 
-  const { status, config, interfaces, clients, blocklist } = useHotspotQueries();
-  const { save, apply, start, stop, recoverWifi, identify, block, unblock } = useHotspotMutations({
+  const { status, config, interfaces, clients, blocklist, knownDevices } = useHotspotQueries();
+  const { saveAndApply, start, stop, recoverWifi, block, unblock } = useHotspotMutations({
     onSaveSuccess: () => setConfigOpen(false),
     onRecoverSuccess: () => setConfirmRecoverOpen(false),
   });
@@ -100,31 +102,41 @@ export function HotspotPage() {
       />
 
       <Tabs defaultValue="connected" className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-4 sm:inline-grid sm:w-auto">
+        <TabsList className="grid h-auto w-full grid-cols-5 sm:inline-grid sm:w-auto">
           <TabsTrigger value="connected" className="gap-2">
+            <Wifi className="h-4 w-4" />
             Conectados
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
               {connectedCount}
             </span>
           </TabsTrigger>
           <TabsTrigger value="blocked" className="gap-2">
+            <Ban className="h-4 w-4" />
             Bloqueados
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
               {blockedCount}
             </span>
           </TabsTrigger>
-          <TabsTrigger value="limits">Limites</TabsTrigger>
-          <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="known" className="gap-2">
+            <History className="h-4 w-4" />
+            Já conectados
+          </TabsTrigger>
+          <TabsTrigger value="limits">
+            <Sliders className="h-4 w-4" />
+            Limites
+          </TabsTrigger>
+          <TabsTrigger value="logs">
+            <ScrollText className="h-4 w-4" />
+            Logs
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="connected" className="mt-0">
           <HotspotClientsCard
             clients={clients.data ?? []}
             running={!!status.data?.running}
-            identifyPendingMac={identify.isPending ? identify.variables : undefined}
             blockPendingMac={block.isPending ? block.variables : undefined}
             unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
-            onIdentify={(mac) => identify.mutate(mac)}
             onBlock={(mac) => block.mutate(mac)}
             onUnblock={(mac) => unblock.mutate(mac)}
           />
@@ -136,6 +148,10 @@ export function HotspotPage() {
             unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
             onUnblock={(mac) => unblock.mutate(mac)}
           />
+        </TabsContent>
+
+        <TabsContent value="known" className="mt-0">
+          <HotspotKnownDevicesCard devices={knownDevices.data ?? []} />
         </TabsContent>
 
         <TabsContent value="limits" className="mt-0">
@@ -152,18 +168,16 @@ export function HotspotPage() {
           <DialogHeader>
             <DialogTitle>Configuração do hotspot</DialogTitle>
             <DialogDescription>
-              Salvar grava no painel administrativo; "Aplicar" recria o hotspot para assumir os novos valores.
+              Salvar já recria o hotspot na hora para assumir os novos valores.
             </DialogDescription>
           </DialogHeader>
           <HotspotConfigForm
             register={register}
             errors={errors}
             handleSubmit={handleSubmit}
-            onSave={(data) => save.mutate(data)}
-            onApply={() => apply.mutate()}
+            onSave={(data) => saveAndApply.mutate(data)}
             isDirty={isDirty}
-            savePending={save.isPending}
-            applyPending={apply.isPending}
+            savePending={saveAndApply.isPending}
             showPassword={showPassword}
             onToggleShowPassword={() => setShowPassword((v) => !v)}
             wifiInterfaces={wifiInterfaces}

@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Ban, RefreshCw, ScanSearch, Settings2, Undo2 } from "lucide-react";
+import { Ban, ScanSearch, Settings2, Undo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { SpeedGauge } from "@/components/ui/speed-gauge";
 import { toBitsPerSecond } from "@/components/hotspot/device-detail/DeviceSpeedCard";
 import { useClientsStats } from "@/components/hotspot/useHotspotQueries";
+import { DeviceIdentifyModal } from "@/components/hotspot/DeviceIdentifyModal";
 
 export interface HotspotClient {
   mac: string;
@@ -16,16 +18,15 @@ export interface HotspotClient {
   deviceName?: string;
   osName?: string;
   confidence?: number;
+  alias?: string;
   blocked?: boolean;
 }
 
 interface HotspotClientsCardProps {
   clients: HotspotClient[];
   running: boolean;
-  identifyPendingMac?: string;
   blockPendingMac?: string;
   unblockPendingMac?: string;
-  onIdentify: (mac: string) => void;
   onBlock: (mac: string) => void;
   onUnblock: (mac: string) => void;
 }
@@ -33,16 +34,16 @@ interface HotspotClientsCardProps {
 export function HotspotClientsCard({
   clients,
   running,
-  identifyPendingMac,
   blockPendingMac,
   unblockPendingMac,
-  onIdentify,
   onBlock,
   onUnblock,
 }: HotspotClientsCardProps) {
   const navigate = useNavigate();
   const stats = useClientsStats(running);
   const statsByMac = new Map(stats.data?.map((entry) => [entry.mac, entry]));
+  const [identifyMac, setIdentifyMac] = useState<string | null>(null);
+  const identifyClient = clients.find((client) => client.mac === identifyMac);
 
   return (
     <Card>
@@ -74,9 +75,9 @@ export function HotspotClientsCard({
                   </div>
                 </TableCell>
                 <TableCell>
-                  {client.deviceName || client.vendor || client.osName ? (
+                  {client.alias || client.deviceName || client.vendor || client.osName ? (
                     <div className="max-w-[320px] space-y-1">
-                      <p className="truncate font-medium">{client.deviceName || client.vendor}</p>
+                      <p className="truncate font-medium">{client.alias || client.deviceName || client.vendor}</p>
                       <p className="truncate text-xs text-muted-foreground">
                         {[client.vendor, client.osName, client.confidence ? `${client.confidence}%` : ""]
                           .filter(Boolean)
@@ -106,17 +107,8 @@ export function HotspotClientsCard({
                       <Settings2 className="h-4 w-4" />
                       Ver detalhes
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={identifyPendingMac === client.mac}
-                      onClick={() => onIdentify(client.mac)}
-                    >
-                      {identifyPendingMac === client.mac ? (
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <ScanSearch className="h-4 w-4" />
-                      )}
+                    <Button variant="outline" size="sm" onClick={() => setIdentifyMac(client.mac)}>
+                      <ScanSearch className="h-4 w-4" />
                       Identificar
                     </Button>
                     {client.blocked ? (
@@ -155,6 +147,11 @@ export function HotspotClientsCard({
           </TableBody>
         </Table>
       </CardContent>
+      <DeviceIdentifyModal
+        client={identifyClient}
+        open={identifyMac !== null}
+        onOpenChange={(open) => !open && setIdentifyMac(null)}
+      />
     </Card>
   );
 }

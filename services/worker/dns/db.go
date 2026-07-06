@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -28,6 +29,22 @@ func openPostgres() (*sql.DB, error) {
 		return nil, err
 	}
 	return db, nil
+}
+
+func loadHotspotGateway(ctx context.Context, db *sql.DB, fallback string) (string, error) {
+	var value string
+	err := db.QueryRowContext(ctx, `SELECT value FROM hotspot_config WHERE key = 'HOTSPOT_GATEWAY'`).Scan(&value)
+	if err == sql.ErrNoRows {
+		return fallback, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback, nil
+	}
+	return value, nil
 }
 
 // loadAllRecords le todos os registros existentes - usado para hidratar o

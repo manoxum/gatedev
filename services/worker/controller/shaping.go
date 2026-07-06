@@ -24,18 +24,22 @@ func registerShapingRoutes(mux *http.ServeMux) {
 }
 
 type shapingGlobalRequest struct {
-	Interface    string `json:"interface"`
-	DownloadMbps *int   `json:"downloadMbps"`
-	UploadMbps   *int   `json:"uploadMbps"`
+	Interface         string `json:"interface"`
+	DownloadRateValue *int   `json:"downloadRateValue"`
+	DownloadRateUnit  string `json:"downloadRateUnit"`
+	UploadRateValue   *int   `json:"uploadRateValue"`
+	UploadRateUnit    string `json:"uploadRateUnit"`
 }
 
 type shapingDeviceRequest struct {
-	Interface    string `json:"interface"`
-	MAC          string `json:"mac"`
-	IP           string `json:"ip"`
-	Fwmark       int    `json:"fwmark"`
-	DownloadMbps *int   `json:"downloadMbps"`
-	UploadMbps   *int   `json:"uploadMbps"`
+	Interface         string `json:"interface"`
+	MAC               string `json:"mac"`
+	IP                string `json:"ip"`
+	Fwmark            int    `json:"fwmark"`
+	DownloadRateValue *int   `json:"downloadRateValue"`
+	DownloadRateUnit  string `json:"downloadRateUnit"`
+	UploadRateValue   *int   `json:"uploadRateValue"`
+	UploadRateUnit    string `json:"uploadRateUnit"`
 }
 
 type shapingStatsResponse struct {
@@ -71,11 +75,13 @@ func handleShapingGlobal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := updateRootCeil(apIface, intOrZero(req.DownloadMbps)); err != nil {
+	downloadValue, downloadUnit := rateOrZero(req.DownloadRateValue, req.DownloadRateUnit)
+	if err := updateRootCeil(apIface, downloadValue, downloadUnit); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := updateRootCeil(uplinkIface, intOrZero(req.UploadMbps)); err != nil {
+	uploadValue, uploadUnit := rateOrZero(req.UploadRateValue, req.UploadRateUnit)
+	if err := updateRootCeil(uplinkIface, uploadValue, uploadUnit); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -111,7 +117,7 @@ func handleShapingDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.DownloadMbps == nil && req.UploadMbps == nil {
+	if req.DownloadRateValue == nil && req.UploadRateValue == nil {
 		removeDeviceClass(apIface, req.Fwmark)
 		removeDeviceClass(uplinkIface, req.Fwmark)
 		w.WriteHeader(http.StatusNoContent)
@@ -125,16 +131,16 @@ func handleShapingDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if req.DownloadMbps != nil {
-		if err := ensureDeviceClass(apIface, req.Fwmark, *req.DownloadMbps); err != nil {
+	if req.DownloadRateValue != nil {
+		if err := ensureDeviceClass(apIface, req.Fwmark, *req.DownloadRateValue, req.DownloadRateUnit); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
 		removeDeviceClass(apIface, req.Fwmark)
 	}
-	if req.UploadMbps != nil {
-		if err := ensureDeviceClass(uplinkIface, req.Fwmark, *req.UploadMbps); err != nil {
+	if req.UploadRateValue != nil {
+		if err := ensureDeviceClass(uplinkIface, req.Fwmark, *req.UploadRateValue, req.UploadRateUnit); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -263,9 +269,12 @@ func uplinkInterfaceName() string {
 	return defaultBindnetUplinkInterface
 }
 
-func intOrZero(value *int) int {
+// rateOrZero devolve o valor/unidade efetivos de uma taxa, com 0/""
+// (sem limite - ensureRootQdisc/updateRootCeil tratam isso caindo no
+// teto nominal noLimitCeilMbps) quando o valor vier nil do backend.
+func rateOrZero(value *int, unit string) (int, string) {
 	if value == nil {
-		return 0
+		return 0, ""
 	}
-	return *value
+	return *value, unit
 }

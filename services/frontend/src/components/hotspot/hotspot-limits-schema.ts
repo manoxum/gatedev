@@ -1,41 +1,63 @@
 import { z } from "zod";
-import { GIGABYTE, type HotspotLimits, type QuotaPeriod } from "@/components/hotspot/hotspot-limits-types";
+import {
+  quotaValueToBytes,
+  bytesToQuotaValue,
+  type HotspotLimits,
+  type QuotaPeriod,
+  type RateUnit,
+} from "@/components/hotspot/hotspot-limits-types";
 
 const optionalPositiveInt = z
   .string()
   .trim()
   .refine((value) => value === "" || (/^\d+$/.test(value) && Number(value) > 0), "Deve ser um número positivo");
 
+const rateUnit = z.enum(["kbit", "mbit", "gbit", "kbyte", "mbyte", "gbyte"]);
+
 export const hotspotLimitsFormSchema = z.object({
-  downloadRateMbps: optionalPositiveInt,
-  uploadRateMbps: optionalPositiveInt,
-  quotaGB: optionalPositiveInt,
+  downloadRateValue: optionalPositiveInt,
+  downloadRateUnit: rateUnit,
+  uploadRateValue: optionalPositiveInt,
+  uploadRateUnit: rateUnit,
+  quotaValue: optionalPositiveInt,
+  quotaUnit: rateUnit,
   quotaPeriod: z.enum(["daily", "weekly", "monthly"]),
-  quotaThrottleDownloadMbps: optionalPositiveInt,
-  quotaThrottleUploadMbps: optionalPositiveInt,
+  quotaThrottleDownloadValue: optionalPositiveInt,
+  quotaThrottleDownloadUnit: rateUnit,
+  quotaThrottleUploadValue: optionalPositiveInt,
+  quotaThrottleUploadUnit: rateUnit,
 });
 
 export type HotspotLimitsFormValues = z.infer<typeof hotspotLimitsFormSchema>;
 
 export function limitsToFormValues(limits: HotspotLimits): HotspotLimitsFormValues {
   return {
-    downloadRateMbps: limits.downloadRateMbps?.toString() ?? "",
-    uploadRateMbps: limits.uploadRateMbps?.toString() ?? "",
-    quotaGB: limits.quotaBytes ? String(Math.round(limits.quotaBytes / GIGABYTE)) : "",
+    downloadRateValue: limits.downloadRateValue?.toString() ?? "",
+    downloadRateUnit: limits.downloadRateUnit,
+    uploadRateValue: limits.uploadRateValue?.toString() ?? "",
+    uploadRateUnit: limits.uploadRateUnit,
+    quotaValue: limits.quotaBytes ? String(Math.round(bytesToQuotaValue(limits.quotaBytes, "gbyte"))) : "",
+    quotaUnit: "gbyte",
     quotaPeriod: limits.quotaPeriod ?? "daily",
-    quotaThrottleDownloadMbps: limits.quotaThrottleDownloadMbps?.toString() ?? "",
-    quotaThrottleUploadMbps: limits.quotaThrottleUploadMbps?.toString() ?? "",
+    quotaThrottleDownloadValue: limits.quotaThrottleDownloadValue?.toString() ?? "",
+    quotaThrottleDownloadUnit: limits.quotaThrottleDownloadUnit,
+    quotaThrottleUploadValue: limits.quotaThrottleUploadValue?.toString() ?? "",
+    quotaThrottleUploadUnit: limits.quotaThrottleUploadUnit,
   };
 }
 
 export function formValuesToLimits(values: HotspotLimitsFormValues): HotspotLimits {
-  const hasQuota = values.quotaGB !== "";
+  const hasQuota = values.quotaValue !== "";
   return {
-    downloadRateMbps: values.downloadRateMbps ? Number(values.downloadRateMbps) : null,
-    uploadRateMbps: values.uploadRateMbps ? Number(values.uploadRateMbps) : null,
-    quotaBytes: hasQuota ? Number(values.quotaGB) * GIGABYTE : null,
+    downloadRateValue: values.downloadRateValue ? Number(values.downloadRateValue) : null,
+    downloadRateUnit: values.downloadRateUnit as RateUnit,
+    uploadRateValue: values.uploadRateValue ? Number(values.uploadRateValue) : null,
+    uploadRateUnit: values.uploadRateUnit as RateUnit,
+    quotaBytes: hasQuota ? quotaValueToBytes(Number(values.quotaValue), values.quotaUnit as RateUnit) : null,
     quotaPeriod: hasQuota ? (values.quotaPeriod as QuotaPeriod) : null,
-    quotaThrottleDownloadMbps: values.quotaThrottleDownloadMbps ? Number(values.quotaThrottleDownloadMbps) : null,
-    quotaThrottleUploadMbps: values.quotaThrottleUploadMbps ? Number(values.quotaThrottleUploadMbps) : null,
+    quotaThrottleDownloadValue: values.quotaThrottleDownloadValue ? Number(values.quotaThrottleDownloadValue) : null,
+    quotaThrottleDownloadUnit: values.quotaThrottleDownloadUnit as RateUnit,
+    quotaThrottleUploadValue: values.quotaThrottleUploadValue ? Number(values.quotaThrottleUploadValue) : null,
+    quotaThrottleUploadUnit: values.quotaThrottleUploadUnit as RateUnit,
   };
 }

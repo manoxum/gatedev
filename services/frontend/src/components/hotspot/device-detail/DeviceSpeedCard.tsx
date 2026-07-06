@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { SpeedGauge } from "@/components/ui/speed-gauge";
 import { useDeviceLimits } from "@/components/hotspot/useHotspotQueries";
+import { rateToBps } from "@/components/hotspot/hotspot-limits-types";
 
 interface DeviceStats {
   downloadBps: number;
@@ -16,16 +17,12 @@ export function toBitsPerSecond(bytesPerSecond: number) {
   return bytesPerSecond * 8;
 }
 
-function mbpsToBps(mbps: number | null | undefined) {
-  return mbps ? mbps * 1_000_000 : null;
-}
-
 // Velocidade ao vivo do dispositivo - poll curto (2.5s) em
 // /api/hotspot/devices/{mac}/stats, que ja devolve bytes/segundo
 // prontos (o backend calcula o delta comparando duas leituras
 // sucessivas dos contadores absolutos do worker). O teto do
-// velocimetro usa o limite Mbps configurado do dispositivo, quando
-// houver - senao autoescala.
+// velocimetro usa o limite (valor + unidade) configurado do
+// dispositivo, quando houver - senao autoescala.
 export function DeviceSpeedCard({ mac }: { mac: string }) {
   const stats = useQuery<DeviceStats>({
     queryKey: ["hotspot", "devices", mac, "stats"],
@@ -39,13 +36,13 @@ export function DeviceSpeedCard({ mac }: { mac: string }) {
       <CardContent className="flex flex-wrap justify-center gap-6 pt-6">
         <SpeedGauge
           valueBps={toBitsPerSecond(stats.data?.downloadBps ?? 0)}
-          maxBps={mbpsToBps(limits.data?.downloadRateMbps)}
+          maxBps={limits.data ? rateToBps(limits.data.downloadRateValue, limits.data.downloadRateUnit) : null}
           label="Download"
           size="lg"
         />
         <SpeedGauge
           valueBps={toBitsPerSecond(stats.data?.uploadBps ?? 0)}
-          maxBps={mbpsToBps(limits.data?.uploadRateMbps)}
+          maxBps={limits.data ? rateToBps(limits.data.uploadRateValue, limits.data.uploadRateUnit) : null}
           label="Upload"
           size="lg"
         />

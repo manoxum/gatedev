@@ -6,17 +6,38 @@ import (
 	"net/http"
 )
 
+// rateUnit e a unidade de uma taxa configurada pelo admin: bits/s
+// (Kb/Mb/Gb na UI, "kbit"/"mbit"/"gbit" no valor - mesmo sufixo que tc
+// usa) ou bytes/s (KB/MB/GB na UI, "kbyte"/"mbyte"/"gbyte" no valor -
+// o worker traduz para os sufixos tc kbps/mbps/gbps). Ver rate() em
+// services/worker/controller/shaping_tc.go.
+type rateUnit = string
+
+const (
+	rateUnitKbit  rateUnit = "kbit"
+	rateUnitMbit  rateUnit = "mbit"
+	rateUnitGbit  rateUnit = "gbit"
+	rateUnitKbyte rateUnit = "kbyte"
+	rateUnitMbyte rateUnit = "mbyte"
+	rateUnitGbyte rateUnit = "gbyte"
+)
+
 // hotspotLimits representa tanto o limite global (singleton) quanto o
 // limite de um dispositivo especifico - mesmo shape de colunas em
-// hotspot_global_limits/hotspot_device_limits. Campos nil = "sem
-// limite desse tipo".
+// hotspot_global_limits/hotspot_device_limits. Campos de valor nil =
+// "sem limite desse tipo" (a unidade correspondente e ignorada nesse
+// caso, mas sempre vem preenchida pelo banco - default "mbit").
 type hotspotLimits struct {
-	DownloadRateMbps          *int    `json:"downloadRateMbps"`
-	UploadRateMbps            *int    `json:"uploadRateMbps"`
-	QuotaBytes                *int64  `json:"quotaBytes"`
-	QuotaPeriod               *string `json:"quotaPeriod"`
-	QuotaThrottleDownloadMbps *int    `json:"quotaThrottleDownloadMbps"`
-	QuotaThrottleUploadMbps   *int    `json:"quotaThrottleUploadMbps"`
+	DownloadRateValue          *int     `json:"downloadRateValue"`
+	DownloadRateUnit           rateUnit `json:"downloadRateUnit"`
+	UploadRateValue            *int     `json:"uploadRateValue"`
+	UploadRateUnit             rateUnit `json:"uploadRateUnit"`
+	QuotaBytes                 *int64   `json:"quotaBytes"`
+	QuotaPeriod                *string  `json:"quotaPeriod"`
+	QuotaThrottleDownloadValue *int     `json:"quotaThrottleDownloadValue"`
+	QuotaThrottleDownloadUnit  rateUnit `json:"quotaThrottleDownloadUnit"`
+	QuotaThrottleUploadValue   *int     `json:"quotaThrottleUploadValue"`
+	QuotaThrottleUploadUnit    rateUnit `json:"quotaThrottleUploadUnit"`
 }
 
 func registerHotspotLimitRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB, worker *workerClient) {
@@ -93,70 +114,113 @@ func registerHotspotLimitRoutes(mux *http.ServeMux, admin *administrator, db *sq
 	}))
 }
 
+// normalizeLimitUnits preenche "mbit" nas unidades que vierem vazias
+// no corpo do PATCH (frontend antigo, ou campo omitido) - garante que
+// nunca violamos o CHECK de unidade nem gravamos "" no Postgres.
+func normalizeLimitUnits(limits hotspotLimits) hotspotLimits {
+	normalize := func(unit rateUnit) rateUnit {
+		if unit == "" {
+			return rateUnitMbit
+		}
+		return unit
+	}
+	limits.DownloadRateUnit = normalize(limits.DownloadRateUnit)
+	limits.UploadRateUnit = normalize(limits.UploadRateUnit)
+	limits.QuotaThrottleDownloadUnit = normalize(limits.QuotaThrottleDownloadUnit)
+	limits.QuotaThrottleUploadUnit = normalize(limits.QuotaThrottleUploadUnit)
+	return limits
+}
+
 func getGlobalLimits(db *sql.DB) (hotspotLimits, error) {
 	var limits hotspotLimits
 	err := db.QueryRow(`
-		SELECT download_rate_mbps, upload_rate_mbps, quota_bytes, quota_period,
-		       quota_throttle_download_mbps, quota_throttle_upload_mbps
+		SELECT download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
+		       quota_bytes, quota_period,
+		       quota_throttle_download_value, quota_throttle_download_unit,
+		       quota_throttle_upload_value, quota_throttle_upload_unit
 		FROM hotspot_global_limits WHERE id = 'global'
-	`).Scan(&limits.DownloadRateMbps, &limits.UploadRateMbps, &limits.QuotaBytes, &limits.QuotaPeriod,
-		&limits.QuotaThrottleDownloadMbps, &limits.QuotaThrottleUploadMbps)
+	`).Scan(&limits.DownloadRateValue, &limits.DownloadRateUnit, &limits.UploadRateValue, &limits.UploadRateUnit,
+		&limits.QuotaBytes, &limits.QuotaPeriod,
+		&limits.QuotaThrottleDownloadValue, &limits.QuotaThrottleDownloadUnit,
+		&limits.QuotaThrottleUploadValue, &limits.QuotaThrottleUploadUnit)
 	if err != nil && err != sql.ErrNoRows {
 		return hotspotLimits{}, err
 	}
-	return limits, nil
+	return normalizeLimitUnits(limits), nil
 }
 
 func upsertGlobalLimits(db *sql.DB, limits hotspotLimits) error {
+	limits = normalizeLimitUnits(limits)
 	_, err := db.Exec(`
-		INSERT INTO hotspot_global_limits (id, download_rate_mbps, upload_rate_mbps, quota_bytes, quota_period,
-		                                    quota_throttle_download_mbps, quota_throttle_upload_mbps, updated_at)
-		VALUES ('global', $1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+		INSERT INTO hotspot_global_limits (id, download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
+		                                    quota_bytes, quota_period,
+		                                    quota_throttle_download_value, quota_throttle_download_unit,
+		                                    quota_throttle_upload_value, quota_throttle_upload_unit, updated_at)
+		VALUES ('global', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
 		ON CONFLICT (id) DO UPDATE
-		SET download_rate_mbps = EXCLUDED.download_rate_mbps,
-		    upload_rate_mbps = EXCLUDED.upload_rate_mbps,
+		SET download_rate_value = EXCLUDED.download_rate_value,
+		    download_rate_unit = EXCLUDED.download_rate_unit,
+		    upload_rate_value = EXCLUDED.upload_rate_value,
+		    upload_rate_unit = EXCLUDED.upload_rate_unit,
 		    quota_bytes = EXCLUDED.quota_bytes,
 		    quota_period = EXCLUDED.quota_period,
-		    quota_throttle_download_mbps = EXCLUDED.quota_throttle_download_mbps,
-		    quota_throttle_upload_mbps = EXCLUDED.quota_throttle_upload_mbps,
+		    quota_throttle_download_value = EXCLUDED.quota_throttle_download_value,
+		    quota_throttle_download_unit = EXCLUDED.quota_throttle_download_unit,
+		    quota_throttle_upload_value = EXCLUDED.quota_throttle_upload_value,
+		    quota_throttle_upload_unit = EXCLUDED.quota_throttle_upload_unit,
 		    updated_at = CURRENT_TIMESTAMP
-	`, limits.DownloadRateMbps, limits.UploadRateMbps, limits.QuotaBytes, limits.QuotaPeriod,
-		limits.QuotaThrottleDownloadMbps, limits.QuotaThrottleUploadMbps)
+	`, limits.DownloadRateValue, limits.DownloadRateUnit, limits.UploadRateValue, limits.UploadRateUnit,
+		limits.QuotaBytes, limits.QuotaPeriod,
+		limits.QuotaThrottleDownloadValue, limits.QuotaThrottleDownloadUnit,
+		limits.QuotaThrottleUploadValue, limits.QuotaThrottleUploadUnit)
 	return err
 }
 
 func getDeviceLimits(db *sql.DB, mac string) (hotspotLimits, bool, error) {
 	var limits hotspotLimits
 	err := db.QueryRow(`
-		SELECT download_rate_mbps, upload_rate_mbps, quota_bytes, quota_period,
-		       quota_throttle_download_mbps, quota_throttle_upload_mbps
+		SELECT download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
+		       quota_bytes, quota_period,
+		       quota_throttle_download_value, quota_throttle_download_unit,
+		       quota_throttle_upload_value, quota_throttle_upload_unit
 		FROM hotspot_device_limits WHERE mac_address = $1
-	`, mac).Scan(&limits.DownloadRateMbps, &limits.UploadRateMbps, &limits.QuotaBytes, &limits.QuotaPeriod,
-		&limits.QuotaThrottleDownloadMbps, &limits.QuotaThrottleUploadMbps)
+	`, mac).Scan(&limits.DownloadRateValue, &limits.DownloadRateUnit, &limits.UploadRateValue, &limits.UploadRateUnit,
+		&limits.QuotaBytes, &limits.QuotaPeriod,
+		&limits.QuotaThrottleDownloadValue, &limits.QuotaThrottleDownloadUnit,
+		&limits.QuotaThrottleUploadValue, &limits.QuotaThrottleUploadUnit)
 	if err == sql.ErrNoRows {
 		return hotspotLimits{}, false, nil
 	}
 	if err != nil {
 		return hotspotLimits{}, false, err
 	}
-	return limits, true, nil
+	return normalizeLimitUnits(limits), true, nil
 }
 
 func upsertDeviceLimits(db *sql.DB, mac string, limits hotspotLimits) error {
+	limits = normalizeLimitUnits(limits)
 	_, err := db.Exec(`
-		INSERT INTO hotspot_device_limits (mac_address, download_rate_mbps, upload_rate_mbps, quota_bytes, quota_period,
-		                                    quota_throttle_download_mbps, quota_throttle_upload_mbps, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+		INSERT INTO hotspot_device_limits (mac_address, download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
+		                                    quota_bytes, quota_period,
+		                                    quota_throttle_download_value, quota_throttle_download_unit,
+		                                    quota_throttle_upload_value, quota_throttle_upload_unit, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
 		ON CONFLICT (mac_address) DO UPDATE
-		SET download_rate_mbps = EXCLUDED.download_rate_mbps,
-		    upload_rate_mbps = EXCLUDED.upload_rate_mbps,
+		SET download_rate_value = EXCLUDED.download_rate_value,
+		    download_rate_unit = EXCLUDED.download_rate_unit,
+		    upload_rate_value = EXCLUDED.upload_rate_value,
+		    upload_rate_unit = EXCLUDED.upload_rate_unit,
 		    quota_bytes = EXCLUDED.quota_bytes,
 		    quota_period = EXCLUDED.quota_period,
-		    quota_throttle_download_mbps = EXCLUDED.quota_throttle_download_mbps,
-		    quota_throttle_upload_mbps = EXCLUDED.quota_throttle_upload_mbps,
+		    quota_throttle_download_value = EXCLUDED.quota_throttle_download_value,
+		    quota_throttle_download_unit = EXCLUDED.quota_throttle_download_unit,
+		    quota_throttle_upload_value = EXCLUDED.quota_throttle_upload_value,
+		    quota_throttle_upload_unit = EXCLUDED.quota_throttle_upload_unit,
 		    updated_at = CURRENT_TIMESTAMP
-	`, mac, limits.DownloadRateMbps, limits.UploadRateMbps, limits.QuotaBytes, limits.QuotaPeriod,
-		limits.QuotaThrottleDownloadMbps, limits.QuotaThrottleUploadMbps)
+	`, mac, limits.DownloadRateValue, limits.DownloadRateUnit, limits.UploadRateValue, limits.UploadRateUnit,
+		limits.QuotaBytes, limits.QuotaPeriod,
+		limits.QuotaThrottleDownloadValue, limits.QuotaThrottleDownloadUnit,
+		limits.QuotaThrottleUploadValue, limits.QuotaThrottleUploadUnit)
 	return err
 }
 

@@ -176,24 +176,37 @@ model HotspotDeviceInfo {
   deviceName String?  @map("device_name")
   osName     String?  @map("os_name")
   confidence Int?
+  alias      String?  @unique
   fetchedAt  DateTime @default(now()) @map("fetched_at") @db.Timestamptz
+
+  // Preenchidos automaticamente (recordDeviceSeen) toda vez que o MAC
+  // aparece na lista de clientes ao vivo - diferente de fetchedAt
+  // (so muda quando identificado/editado manualmente). Alimentam a
+  // listagem de "dispositivos ja conectados" (GET /hotspot/devices/known).
+  firstSeenAt DateTime? @map("first_seen_at") @db.Timestamptz
+  lastSeenAt  DateTime? @map("last_seen_at") @db.Timestamptz
 
   @@map("hotspot_device_info")
 }
 
 // Limite de trafego para todo o hotspot (singleton, id fixo "global").
-// Taxa (Mbps) e cota (bytes/periodo) sao independentes e ambas
-// opcionais - null em qualquer uma delas significa "sem limite desse
-// tipo". Ver services/backend/hotspot_limits.go.
+// Taxa (valor + unidade kbit/mbit/gbit) e cota (bytes/periodo) sao
+// independentes e ambas opcionais - null no valor significa "sem
+// limite desse tipo" (a unidade sempre tem um default e nao e usada
+// nesse caso). Ver services/backend/hotspot_limits.go.
 model HotspotGlobalLimits {
-  id                        String   @id @default("global") @map("id")
-  downloadRateMbps          Int?     @map("download_rate_mbps")
-  uploadRateMbps            Int?     @map("upload_rate_mbps")
-  quotaBytes                BigInt?  @map("quota_bytes")
-  quotaPeriod               String?  @map("quota_period")
-  quotaThrottleDownloadMbps Int?     @map("quota_throttle_download_mbps")
-  quotaThrottleUploadMbps   Int?     @map("quota_throttle_upload_mbps")
-  updatedAt                 DateTime @default(now()) @map("updated_at") @db.Timestamptz
+  id                         String   @id @default("global") @map("id")
+  downloadRateValue          Int?     @map("download_rate_value")
+  downloadRateUnit           String   @default("mbit") @map("download_rate_unit")
+  uploadRateValue            Int?     @map("upload_rate_value")
+  uploadRateUnit             String   @default("mbit") @map("upload_rate_unit")
+  quotaBytes                 BigInt?  @map("quota_bytes")
+  quotaPeriod                String?  @map("quota_period")
+  quotaThrottleDownloadValue Int?     @map("quota_throttle_download_value")
+  quotaThrottleDownloadUnit  String   @default("mbit") @map("quota_throttle_download_unit")
+  quotaThrottleUploadValue   Int?     @map("quota_throttle_upload_value")
+  quotaThrottleUploadUnit    String   @default("mbit") @map("quota_throttle_upload_unit")
+  updatedAt                  DateTime @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("hotspot_global_limits")
 }
@@ -201,14 +214,18 @@ model HotspotGlobalLimits {
 // Limite de trafego por dispositivo (mesma chave natural mac_address
 // de HotspotBlockedDevice/HotspotDeviceInfo). Ver hotspot_limits.go.
 model HotspotDeviceLimits {
-  macAddress                String   @id @map("mac_address")
-  downloadRateMbps          Int?     @map("download_rate_mbps")
-  uploadRateMbps            Int?     @map("upload_rate_mbps")
-  quotaBytes                BigInt?  @map("quota_bytes")
-  quotaPeriod               String?  @map("quota_period")
-  quotaThrottleDownloadMbps Int?     @map("quota_throttle_download_mbps")
-  quotaThrottleUploadMbps   Int?     @map("quota_throttle_upload_mbps")
-  updatedAt                 DateTime @default(now()) @map("updated_at") @db.Timestamptz
+  macAddress                 String   @id @map("mac_address")
+  downloadRateValue          Int?     @map("download_rate_value")
+  downloadRateUnit           String   @default("mbit") @map("download_rate_unit")
+  uploadRateValue            Int?     @map("upload_rate_value")
+  uploadRateUnit             String   @default("mbit") @map("upload_rate_unit")
+  quotaBytes                 BigInt?  @map("quota_bytes")
+  quotaPeriod                String?  @map("quota_period")
+  quotaThrottleDownloadValue Int?     @map("quota_throttle_download_value")
+  quotaThrottleDownloadUnit  String   @default("mbit") @map("quota_throttle_download_unit")
+  quotaThrottleUploadValue   Int?     @map("quota_throttle_upload_value")
+  quotaThrottleUploadUnit    String   @default("mbit") @map("quota_throttle_upload_unit")
+  updatedAt                  DateTime @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("hotspot_device_limits")
 }
@@ -268,4 +285,20 @@ model HotspotDeviceCredit {
   updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("hotspot_device_credit")
+}
+
+// Historico/extrato de mutacoes de saldo de credito por dispositivo -
+// recarga manual, recarga automatica e debito de trafego (conta
+// corrente de bytes). Sem relacao FK proposital (mesmo padrao das
+// demais tabelas hotspot_device_*).
+model HotspotDeviceCreditHistory {
+  id                BigInt   @id @default(autoincrement())
+  macAddress        String   @map("mac_address")
+  entryType         String   @map("entry_type")
+  amountBytes       BigInt   @map("amount_bytes")
+  balanceAfterBytes BigInt   @map("balance_after_bytes")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([macAddress, createdAt])
+  @@map("hotspot_device_credit_history")
 }

@@ -96,19 +96,29 @@ func reconcileDevice(ctx context.Context, db *sql.DB, worker *workerClient, ifac
 		}
 	}
 
-	return reconcileDeviceCredit(ctx, db, worker, mac, deltaDown+deltaUp)
+	return reconcileDeviceCredit(ctx, db, worker, mac, ip, deltaDown+deltaUp)
 }
 
 // reconcileDeviceCredit desconta o trafego deste ciclo do saldo de
 // credito (so quando habilitado) e bloqueia ao vivo assim que o saldo
 // zera - desbloquear e responsabilidade exclusiva de uma recarga
-// (manual ou automatica), nunca deste loop.
-func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient, mac string, totalBytes int64) error {
+// (manual ou automatica), nunca deste loop. Enquanto o dispositivo
+// continuar bloqueado por credito, reforca o bloqueio a cada ciclo
+// (auto-cura): o hotspot flusha o chain BINDNET-HOTSPOT a cada
+// start/apply, o que apagaria as regras DROP junto - reenviar aqui,
+// mesmo idioma ja usado por ensureDeviceShaping.
+func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient, mac, ip string, totalBytes int64) error {
 	credit, err := ensureDeviceCreditRow(db, mac)
 	if err != nil {
 		return err
 	}
-	if !credit.Enabled || totalBytes == 0 {
+	if !credit.Enabled {
+		return nil
+	}
+	if credit.BlockedByCredit {
+		applyLiveCreditBlock(ctx, db, worker, mac, ip, true)
+	}
+	if totalBytes == 0 {
 		return nil
 	}
 	newBalance, err := debitDeviceCredit(db, mac, totalBytes)
@@ -119,7 +129,7 @@ func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient
 		if err := blockDeviceForCredit(db, mac); err != nil {
 			return err
 		}
-		applyLiveHotspotBlock(ctx, db, worker, mac, true)
+		applyLiveCreditBlock(ctx, db, worker, mac, ip, true)
 	}
 	return nil
 }
@@ -153,8 +163,8 @@ func reconcileGlobal(ctx context.Context, db *sql.DB, worker *workerClient, ifac
 	if err := setGlobalThrottled(db, exceeded); err != nil {
 		return err
 	}
-	downloadMbps, uploadMbps := effectiveGlobalRates(limits, traffic)
-	return applyGlobalShaping(ctx, worker, iface, downloadMbps, uploadMbps)
+	downloadRate, uploadRate := effectiveGlobalRates(limits, traffic)
+	return applyGlobalShaping(ctx, worker, iface, downloadRate, uploadRate)
 }
 
 type shapingStatsPayload struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 )
@@ -131,49 +132,6 @@ func ensureDeviceCreditRow(db *sql.DB, mac string) (hotspotDeviceCredit, error) 
 	return c, err
 }
 
-// applyManualRecharge soma o valor ao saldo (respeitando o plafond, se
-// houver) e desbloqueia ao vivo se o dispositivo estava bloqueado por
-// falta de credito e o saldo voltou a ficar positivo.
-func applyManualRecharge(ctx context.Context, db *sql.DB, worker *workerClient, mac string, amountBytes int64) (hotspotDeviceCredit, error) {
-	if _, err := ensureDeviceCreditRow(db, mac); err != nil {
-		return hotspotDeviceCredit{}, err
-	}
-	var credit hotspotDeviceCredit
-	err := db.QueryRow(`
-		UPDATE hotspot_device_credit
-		SET balance_bytes = CASE
-		        WHEN plafond_bytes IS NOT NULL THEN LEAST(balance_bytes + $2, plafond_bytes)
-		        ELSE balance_bytes + $2
-		    END,
-		    updated_at = CURRENT_TIMESTAMP
-		WHERE mac_address = $1
-		RETURNING mac_address, enabled, balance_bytes, recharge_amount_bytes, recharge_period,
-		          plafond_bytes, next_recharge_at, blocked_by_credit
-	`, mac, amountBytes).Scan(&credit.MACAddress, &credit.Enabled, &credit.BalanceBytes, &credit.RechargeAmountBytes,
-		&credit.RechargePeriod, &credit.PlafondBytes, &credit.NextRechargeAt, &credit.BlockedByCredit)
-	if err != nil {
-		return hotspotDeviceCredit{}, err
-	}
-	if credit.BlockedByCredit && credit.BalanceBytes > 0 {
-		if err := unblockDeviceForCredit(db, mac); err != nil {
-			return credit, err
-		}
-		credit.BlockedByCredit = false
-		applyLiveHotspotBlock(ctx, db, worker, mac, false)
-	}
-	return credit, nil
-}
-
-func unblockDeviceForCredit(db *sql.DB, mac string) error {
-	_, err := db.Exec(`UPDATE hotspot_device_credit SET blocked_by_credit = false, updated_at = CURRENT_TIMESTAMP WHERE mac_address = $1`, mac)
-	return err
-}
-
-func blockDeviceForCredit(db *sql.DB, mac string) error {
-	_, err := db.Exec(`UPDATE hotspot_device_credit SET blocked_by_credit = true, updated_at = CURRENT_TIMESTAMP WHERE mac_address = $1`, mac)
-	return err
-}
-
 // debitDeviceCredit desconta o total trafegado (download+upload) de um
 // ciclo de reconciliacao do saldo de credito - chamado pelo loop em
 // hotspot_reconcile.go, so quando o dispositivo tem credito habilitado.
@@ -184,7 +142,38 @@ func debitDeviceCredit(db *sql.DB, mac string, totalBytes int64) (newBalance int
 		WHERE mac_address = $1
 		RETURNING balance_bytes
 	`, mac, totalBytes).Scan(&newBalance)
-	return newBalance, err
+	if err != nil {
+		return 0, err
+	}
+	if err := recordCreditHistory(db, mac, "debit", -totalBytes, newBalance); err != nil {
+		return 0, err
+	}
+	return newBalance, nil
+}
+
+// applyLiveCreditBlock aplica (ou remove) o bloqueio de trafego por
+// falta de credito - diferente de applyLiveHotspotBlock (hostapd
+// deny_acl+deauth, usado so pelo bloqueio manual do admin), aqui o
+// dispositivo continua associado ao Wi-Fi, so o trafego para de
+// passar (DROP via iptables no worker, ver
+// services/worker/controller/traffic_block.go). ip so e necessario
+// para block=true (a regra de download precisa do IP atual); no
+// unblock a remocao e so por comentario, sem IP.
+func applyLiveCreditBlock(ctx context.Context, db *sql.DB, worker *workerClient, mac, ip string, block bool) {
+	iface, err := hotspotWifiInterface(ctx, db)
+	if err != nil {
+		log.Printf("[backend] bloqueio por credito persistido, mas nao foi possivel ler WIFI_INTERFACE: %v", err)
+		return
+	}
+	path := "/hotspot/trafficunblock"
+	payload := map[string]string{"interface": iface, "mac": mac}
+	if block {
+		path = "/hotspot/trafficblock"
+		payload["ip"] = ip
+	}
+	if err := worker.call(ctx, http.MethodPost, path, payload, nil); err != nil {
+		log.Printf("[backend] bloqueio por credito persistido, mas aplicacao ao vivo de %s falhou: %v", mac, err)
+	}
 }
 
 func hotspotCreditBlockedSet(db *sql.DB) (map[string]bool, error) {

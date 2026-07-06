@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -78,6 +79,9 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 		}
 		reapplyHotspotBlocklist(r.Context(), db, worker, iface)
 		reapplyHotspotShaping(r.Context(), db, worker, iface)
+		if err := setHotspotDesiredState(r.Context(), db, true); err != nil {
+			log.Printf("[backend] falha ao gravar estado desejado do hotspot (ligado): %v", err)
+		}
 		username, _ := sessionUser(r, admin)
 		audit.record(r.Context(), "hotspot_started", username, nil)
 		w.WriteHeader(http.StatusNoContent)
@@ -87,6 +91,9 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 		if err := stopHotspotService(r.Context(), worker); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
+		}
+		if err := setHotspotDesiredState(r.Context(), db, false); err != nil {
+			log.Printf("[backend] falha ao gravar estado desejado do hotspot (parado): %v", err)
 		}
 		username, _ := sessionUser(r, admin)
 		audit.record(r.Context(), "hotspot_stopped", username, nil)

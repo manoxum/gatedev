@@ -7,6 +7,7 @@ import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
 import { DeviceOverviewTab } from "@/components/hotspot/device-detail/DeviceOverviewTab";
 import { DeviceLimitsTab } from "@/components/hotspot/device-detail/DeviceLimitsTab";
 import { DeviceCreditCard } from "@/components/hotspot/device-detail/DeviceCreditCard";
+import { DeviceCreditHistoryCard } from "@/components/hotspot/device-detail/DeviceCreditHistoryCard";
 import { DeviceSpeedCard } from "@/components/hotspot/device-detail/DeviceSpeedCard";
 import { usePageHeader } from "@/hooks/usePageHeader";
 
@@ -18,7 +19,7 @@ export function HotspotDeviceDetailPage() {
   const { clients } = useHotspotQueries();
   const client = clients.data?.find((candidate) => candidate.mac === mac);
 
-  usePageHeader({ title: client?.deviceName || client?.vendor || mac, description: client?.ip });
+  usePageHeader({ title: client?.alias || client?.deviceName || client?.vendor || mac, description: client?.ip });
 
   if (!clients.isLoading && !client) {
     return (
@@ -44,7 +45,7 @@ export function HotspotDeviceDetailPage() {
           Hotspot
         </Button>
         <div>
-          <h1 className="text-2xl font-semibold">{client.deviceName || client.vendor || "Dispositivo"}</h1>
+          <h1 className="text-2xl font-semibold">{client.alias || client.deviceName || client.vendor || "Dispositivo"}</h1>
           <p className="font-mono text-sm text-muted-foreground">{client.mac}</p>
         </div>
       </div>
@@ -71,8 +72,9 @@ export function HotspotDeviceDetailPage() {
         <TabsContent value="limits">
           <DeviceLimitsTab mac={client.mac} />
         </TabsContent>
-        <TabsContent value="credit">
+        <TabsContent value="credit" className="space-y-4">
           <DeviceCreditCard mac={client.mac} />
+          <DeviceCreditHistoryCard mac={client.mac} />
         </TabsContent>
       </Tabs>
     </div>

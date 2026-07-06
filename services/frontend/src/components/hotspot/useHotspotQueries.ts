@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import type { HotspotBlockedDevice } from "@/components/hotspot/HotspotBlocklistCard";
 import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
 import type { HotspotLimits, HotspotTraffic } from "@/components/hotspot/hotspot-limits-types";
-import type { HotspotCredit } from "@/components/hotspot/hotspot-credit-types";
+import type { HotspotCredit, HotspotCreditHistoryEntry } from "@/components/hotspot/hotspot-credit-types";
 
 export interface HotspotStatus {
   running: boolean;
@@ -16,6 +16,17 @@ export interface NetworkInterface {
   type: "wifi" | "other";
   state: string;
   speedMbps?: number;
+}
+
+export interface HotspotKnownDevice {
+  mac: string;
+  vendor?: string;
+  deviceName?: string;
+  osName?: string;
+  alias?: string;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+  connected: boolean;
 }
 
 export function useHotspotQueries() {
@@ -42,8 +53,12 @@ export function useHotspotQueries() {
     queryKey: ["hotspot", "blocklist"],
     queryFn: () => api.get<HotspotBlockedDevice[]>("/hotspot/blocklist"),
   });
+  const knownDevices = useQuery<HotspotKnownDevice[]>({
+    queryKey: ["hotspot", "devices", "known"],
+    queryFn: () => api.get<HotspotKnownDevice[]>("/hotspot/devices/known"),
+  });
 
-  return { status, config, interfaces, clients, blocklist };
+  return { status, config, interfaces, clients, blocklist, knownDevices };
 }
 
 export function useGlobalLimits() {
@@ -97,6 +112,14 @@ export function useDeviceCredit(mac: string) {
   return useQuery<HotspotCredit>({
     queryKey: ["hotspot", "devices", mac, "credit"],
     queryFn: () => api.get<HotspotCredit>(`/hotspot/devices/${encodeURIComponent(mac)}/credit`),
+    enabled: !!mac,
+  });
+}
+
+export function useDeviceCreditHistory(mac: string) {
+  return useQuery<HotspotCreditHistoryEntry[]>({
+    queryKey: ["hotspot", "devices", mac, "credit", "history"],
+    queryFn: () => api.get<HotspotCreditHistoryEntry[]>(`/hotspot/devices/${encodeURIComponent(mac)}/credit/history`),
     enabled: !!mac,
   });
 }
