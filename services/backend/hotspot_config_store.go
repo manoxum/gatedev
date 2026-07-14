@@ -139,9 +139,11 @@ func hotspotWifiInterface(ctx context.Context, db *sql.DB) (string, error) {
 // tabela hotspot_config, mas fora de hotspotConfigKeys - de proposito,
 // pra nao aparecer em GET /api/hotspot/config nem poder ser
 // sobrescrita via PATCH (saveHotspotConfig rejeita chaves fora da
-// allowlist). Usada so por autoStartHotspotOnBoot em
+// allowlist). Usada por autoStartHotspotOnBoot em
 // hotspot_autostart.go pra decidir se religa o hotspot sozinho quando
-// o backend reinicia.
+// o backend reinicia, e por recoverHotspotIfDesired em
+// hotspot_reconcile.go pra decidir se religa sozinho quando o hotspot
+// cai sem pedido do admin (ex.: watchdog de falha de beacon).
 const hotspotDesiredStateKey = "_DESIRED_STATE"
 
 func setHotspotDesiredState(ctx context.Context, db *sql.DB, running bool) error {

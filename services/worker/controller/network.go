@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -12,11 +11,6 @@ import (
 	"strings"
 	"time"
 )
-
-// nmDropin e o arquivo de configuracao que marca a interface Wi-Fi
-// como nao-gerenciada pelo NetworkManager, para o hostapd assumir o
-// controle dela durante o hotspot.
-const nmDropin = "/etc/NetworkManager/conf.d/90-bindnet-hotspot-unmanaged.conf"
 
 func registerNetworkRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /network/interfaces", handleInterfaces)
@@ -27,10 +21,11 @@ func registerNetworkRoutes(mux *http.ServeMux) {
 }
 
 type interfaceInfo struct {
-	Name      string `json:"name"`
-	Type      string `json:"type"` // "wifi" | "other"
-	State     string `json:"state"`
-	SpeedMbps int    `json:"speedMbps,omitempty"`
+	Name       string `json:"name"`
+	Type       string `json:"type"` // "wifi" | "other"
+	State      string `json:"state"`
+	SpeedMbps  int    `json:"speedMbps,omitempty"`
+	Associated bool   `json:"associated,omitempty"` // so relevante para type=="wifi"
 }
 
 // virtualInterfacePrefixes cobre interfaces que o Docker/kernel criam
@@ -90,22 +85,42 @@ func handleInterfaces(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		ifaceType := "other"
+		associated := false
 		if wifi[name] {
 			ifaceType = "wifi"
+			associated = interfaceAssociated(name)
 		}
 		state := "down"
 		if strings.Contains(line, "UP") {
 			state = "up"
 		}
 		interfaces = append(interfaces, interfaceInfo{
-			Name:      name,
-			Type:      ifaceType,
-			State:     state,
-			SpeedMbps: interfaceSpeedMbps(name),
+			Name:       name,
+			Type:       ifaceType,
+			State:      state,
+			SpeedMbps:  interfaceSpeedMbps(name),
+			Associated: associated,
 		})
 	}
 
 	_ = json.NewEncoder(w).Encode(interfaces)
+}
+
+// interfaceAssociated diz se a interface Wi-Fi esta associada como
+// estacao (cliente) a uma rede agora - o mesmo teste que
+// services/worker/hotspot/entrypoint.sh (try_create_ap) usa para
+// decidir entre criar uma interface AP virtual (preservando essa
+// associacao) ou usar --no-virt diretamente na interface fisica. O
+// backend usa este campo para so desgerenciar a placa fisica no
+// NetworkManager (POST /network/wifi-unmanage) quando ela NAO estiver
+// associada - ver unmanagePhysicalInterfaceIfIdle em
+// services/backend/hotspot_network.go.
+func interfaceAssociated(name string) bool {
+	output, err := exec.Command("iw", "dev", name, "link").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(string(output)), "Connected to")
 }
 
 func interfaceSpeedMbps(name string) int {
@@ -118,101 +133,6 @@ func interfaceSpeedMbps(name string) int {
 		return 0
 	}
 	return speed
-}
-
-type interfaceRequest struct {
-	Interface string `json:"interface"`
-}
-
-// handleWifiUnmanage marca a interface fisica (e a virtual "ap0" que o
-// create_ap cria) como nao-gerenciada pelo NetworkManager, para o
-// hostapd poder assumir o controle dela.
-func handleWifiUnmanage(w http.ResponseWriter, r *http.Request) {
-	var req interfaceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Interface == "" {
-		http.Error(w, "campo 'interface' obrigatorio", http.StatusBadRequest)
-		return
-	}
-
-	content := fmt.Sprintf("[keyfile]\nunmanaged-devices=interface-name:%s;interface-name:ap0\n", req.Interface)
-	if err := os.WriteFile(nmDropin, []byte(content), 0644); err != nil {
-		log.Printf("[worker] erro ao escrever %s: %v", nmDropin, err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	reloadOutput, reloadErr := reloadNetworkManagerConfig()
-	if reloadErr != nil {
-		log.Printf("[worker] aviso: 'nmcli general reload conf' falhou; tentando aplicar estado runtime mesmo assim: %v (%s)", reloadErr, reloadOutput)
-	}
-	if output, err := setDeviceManaged(req.Interface, false); err != nil {
-		log.Printf("[worker] erro ao rodar 'nmcli device set %s managed no': %v (%s)", req.Interface, err, output)
-		if reloadErr != nil {
-			http.Error(w, fmt.Sprintf("%s\n%s", strings.TrimSpace(string(reloadOutput)), strings.TrimSpace(string(output))), http.StatusInternalServerError)
-			return
-		}
-		http.Error(w, string(output), http.StatusInternalServerError)
-		return
-	}
-	// ap0 pode nao existir ainda; se existir, tambem fica fora do NetworkManager.
-	_, _ = setDeviceManaged("ap0", false)
-	// "managed no" so impede o NetworkManager de gerenciar a interface
-	// dali pra frente - se ela ja estava associada como cliente a uma
-	// rede Wi-Fi, a associacao continua ativa. Com a placa ainda
-	// ocupada como estacao, o create_ap falha ao criar a interface AP
-	// virtual em qualquer canal/banda ("RTNETLINK answers: Resource
-	// busy"), porque o driver nao aceita uma segunda interface virtual
-	// enquanto a fisica esta associada. Desconectar aqui garante que a
-	// placa esteja livre antes do hotspot tentar assumi-la.
-	if output, err := disconnectDevice(req.Interface); err != nil {
-		log.Printf("[worker] aviso: 'nmcli device disconnect %s' falhou (pode ja estar desconectado): %v (%s)", req.Interface, err, output)
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// handleWifiManage remove o drop-in e devolve a interface ao controle
-// normal do NetworkManager.
-func handleWifiManage(w http.ResponseWriter, r *http.Request) {
-	var req interfaceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Interface == "" {
-		http.Error(w, "campo 'interface' obrigatorio", http.StatusBadRequest)
-		return
-	}
-
-	_ = os.Remove(nmDropin)
-	reloadOutput, reloadErr := reloadNetworkManagerConfig()
-	if reloadErr != nil {
-		log.Printf("[worker] aviso: 'nmcli general reload conf' falhou; tentando devolver %s mesmo assim: %v (%s)", req.Interface, reloadErr, reloadOutput)
-	}
-	output, err := setDeviceManaged(req.Interface, true)
-	if err != nil {
-		log.Printf("[worker] erro ao rodar 'nmcli device set %s managed yes': %v (%s)", req.Interface, err, output)
-		if reloadErr != nil {
-			http.Error(w, fmt.Sprintf("%s\n%s", strings.TrimSpace(string(reloadOutput)), strings.TrimSpace(string(output))), http.StatusInternalServerError)
-			return
-		}
-		http.Error(w, string(output), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-func reloadNetworkManagerConfig() ([]byte, error) {
-	return exec.Command("nmcli", "general", "reload", "conf").CombinedOutput()
-}
-
-func setDeviceManaged(iface string, managed bool) ([]byte, error) {
-	value := "no"
-	if managed {
-		value = "yes"
-	}
-	return exec.Command("nmcli", "device", "set", iface, "managed", value).CombinedOutput()
-}
-
-// disconnectDevice desassocia a interface de qualquer rede Wi-Fi a que
-// ela esteja conectada como cliente. Erro aqui e esperado/inofensivo
-// quando a interface ja estava desconectada.
-func disconnectDevice(iface string) ([]byte, error) {
-	return exec.Command("nmcli", "device", "disconnect", iface).CombinedOutput()
 }
 
 type dnsTestRequest struct {

@@ -19,17 +19,18 @@ type workerHotspotClient struct {
 }
 
 type hotspotClientResponse struct {
-	MAC         string `json:"mac"`
-	IP          string `json:"ip"`
-	Hostname    string `json:"hostname"`
-	Vendor      string `json:"vendor,omitempty"`
-	DeviceName  string `json:"deviceName,omitempty"`
-	OSName      string `json:"osName,omitempty"`
-	Confidence  int    `json:"confidence,omitempty"`
-	Alias       string `json:"alias,omitempty"`
-	Blocked     bool   `json:"blocked"`
-	ProfileID   string `json:"profileId,omitempty"`
-	ProfileName string `json:"profileName,omitempty"`
+	MAC         string      `json:"mac"`
+	IP          string      `json:"ip"`
+	Hostname    string      `json:"hostname"`
+	Vendor      string      `json:"vendor,omitempty"`
+	DeviceName  string      `json:"deviceName,omitempty"`
+	OSName      string      `json:"osName,omitempty"`
+	Confidence  int         `json:"confidence,omitempty"`
+	Alias       string      `json:"alias,omitempty"`
+	Blocked     bool        `json:"blocked"`
+	BlockReason blockReason `json:"blockReason,omitempty"`
+	ProfileID   string      `json:"profileId,omitempty"`
+	ProfileName string      `json:"profileName,omitempty"`
 }
 
 type hotspotDeviceInfo struct {
@@ -60,7 +61,7 @@ func registerHotspotDeviceRoutes(mux *http.ServeMux, admin *administrator, db *s
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, false))
+		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, blockReasonNone))
 	}))
 
 	registerHotspotDeviceIdentityRoute(mux, admin, db)
@@ -88,6 +89,10 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 	if err != nil {
 		return nil, err
 	}
+	blockedByQuota, err := hotspotQuotaBlockedSet(db)
+	if err != nil {
+		return nil, err
+	}
 	profiles, err := hotspotDeviceProfileRefs(db)
 	if err != nil {
 		return nil, err
@@ -102,7 +107,7 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 		if err := recordDeviceSeen(db, mac); err != nil {
 			log.Printf("[backend] falha ao registrar %s como visto: %v", mac, err)
 		}
-		enriched := infoToClientFields(mac, info[mac], blocked[mac] || blockedByCredit[mac])
+		enriched := infoToClientFields(mac, info[mac], deviceBlockReason(mac, blocked, blockedByCredit, blockedByQuota))
 		enriched.IP = client.IP
 		enriched.Hostname = client.Hostname
 		if ref, found := profiles[mac]; found {
@@ -114,8 +119,8 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 	return clients, nil
 }
 
-func infoToClientFields(mac string, info hotspotDeviceInfo, blocked bool) hotspotClientResponse {
-	client := hotspotClientResponse{MAC: mac, Blocked: blocked}
+func infoToClientFields(mac string, info hotspotDeviceInfo, reason blockReason) hotspotClientResponse {
+	client := hotspotClientResponse{MAC: mac, Blocked: reason != blockReasonNone, BlockReason: reason}
 	if info.Vendor.Valid {
 		client.Vendor = info.Vendor.String
 	}

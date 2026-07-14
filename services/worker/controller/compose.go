@@ -22,6 +22,9 @@ func registerComposeRoutes(mux *http.ServeMux) {
 
 func handleHotspotServiceAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var config map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&config)
+
 		if action != "stop" {
 			if err := ensureHotspotContainer(); err != nil {
 				log.Printf("[worker] erro ao garantir container do hotspot: %v", err)
@@ -33,6 +36,18 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
+			// Checa a associacao Wi-Fi cliente o mais tarde possivel,
+			// imediatamente antes do "docker exec ... start" abaixo -
+			// minimiza a janela entre esta checagem e a checagem
+			// equivalente que try_create_ap (entrypoint.sh) faz sozinho
+			// alguns segundos depois. Um round-trip a mais aqui (ex.:
+			// checar a partir do backend, bem antes do /hotspot/apply e
+			// do restart do dns-provider) da tempo de sobra pra uma
+			// associacao Wi-Fi marginal cair entre as duas checagens e
+			// as duas discordarem - foi exatamente essa janela que expos
+			// o bug do NetworkManager brigando pela placa com o hostapd
+			// (ver unmanageWifiInterface em network.go).
+			unmanageWifiInterfaceIfIdle(config["WIFI_INTERFACE"])
 		}
 
 		output, err := execHotspotEntrypoint(action)
@@ -42,6 +57,22 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// unmanageWifiInterfaceIfIdle desgerencia a placa Wi-Fi fisica no
+// NetworkManager antes do hotspot subir, mas so quando ela NAO esta
+// associada como cliente agora - mesmo criterio que try_create_ap
+// (entrypoint.sh) usa para escolher --no-virt em vez de criar uma
+// interface AP virtual. Quando ha associacao ativa (AP+STA), a placa
+// fica gerenciada de proposito, para preservar o Wi-Fi cliente do
+// usuario. Falha/ausencia de iface nunca bloqueia o start.
+func unmanageWifiInterfaceIfIdle(iface string) {
+	if iface == "" || interfaceAssociated(iface) {
+		return
+	}
+	if err := unmanageWifiInterface(iface); err != nil {
+		log.Printf("[worker] aviso: falha ao desgerenciar %s no NetworkManager: %v", iface, err)
 	}
 }
 

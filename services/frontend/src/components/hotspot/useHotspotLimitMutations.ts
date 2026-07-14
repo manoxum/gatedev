@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { HotspotLimits } from "@/components/hotspot/hotspot-limits-types";
+import type { HotspotGlobalLimits, HotspotLimits } from "@/components/hotspot/hotspot-limits-types";
 
 function onLimitsError(error: unknown) {
   toast.error(error instanceof ApiError ? error.message : "Falha ao salvar limite");
@@ -11,7 +11,7 @@ export function useGlobalLimitsMutation() {
   const queryClient = useQueryClient();
 
   const save = useMutation({
-    mutationFn: (limits: HotspotLimits) => api.patch("/hotspot/limits/global", limits),
+    mutationFn: (limits: HotspotGlobalLimits) => api.patch("/hotspot/limits/global", limits),
     onSuccess: () => {
       toast.success("Limite global salvo.");
       queryClient.invalidateQueries({ queryKey: ["hotspot", "limits", "global"] });
@@ -22,6 +22,11 @@ export function useGlobalLimitsMutation() {
   return { save };
 }
 
+// Sem mutation de "remover limite" - o tipo de limitação (ilimitado/
+// crédito/cota) é sempre salvo explicitamente via este PATCH, nunca
+// removido para "voltar ao global" (o override nunca caía pro global
+// mesmo antes, só pro perfil - ver RULE.md). Reset de cota por período
+// é uma ação separada, ver useHotspotDeviceQuotaMutations.ts.
 export function useDeviceLimitsMutation(mac: string) {
   const queryClient = useQueryClient();
 
@@ -36,14 +41,5 @@ export function useDeviceLimitsMutation(mac: string) {
     onError: onLimitsError,
   });
 
-  const remove = useMutation({
-    mutationFn: () => api.del(`/hotspot/devices/${encodeURIComponent(mac)}/limits`),
-    onSuccess: () => {
-      toast.success("Limite do dispositivo removido.");
-      invalidate();
-    },
-    onError: onLimitsError,
-  });
-
-  return { save, remove };
+  return { save };
 }

@@ -21,11 +21,23 @@ const minGuaranteedMbps = 1
 
 // ensureRootQdisc garante a hierarquia HTB minima em uma interface:
 // qdisc raiz (default 1:999, catch-all para quem nao tem classe
-// dedicada) + classe pai 1:1 (teto global) + classe default 1:999.
-// Idempotente via "tc ... replace" - nao falha se ja existir.
+// dedicada) + classe pai 1:1 (teto global) + classe default 1:999. So
+// cria a qdisc raiz quando ela ainda nao existe (ver hasHTBRootQdisc) -
+// "tc qdisc replace" NAO e idempotente para htb: a primeira chamada
+// cria normalmente, mas qualquer chamada seguinte falha com "Error:
+// Change operation not supported by specified qdisc." (confirmado ao
+// vivo neste host - o kernel recusa reconfigurar uma qdisc htb raiz ja
+// existente via netlink "change", so classes filhas suportam "replace"
+// de verdade). Como ensureRootQdisc roda a cada shaping de dispositivo
+// (todo poll de 2-3s da pagina de detalhe, todo ciclo de reconciliacao),
+// sem essa checagem a segunda chamada em diante sempre falhava,
+// quebrando shaping E contagem ao vivo pra qualquer dispositivo com
+// taxa configurada.
 func ensureRootQdisc(iface string) error {
-	if err := runTC("qdisc", "replace", "dev", iface, "root", "handle", "1:", "htb", "default", "999"); err != nil {
-		return fmt.Errorf("qdisc raiz em %s: %w", iface, err)
+	if !hasHTBRootQdisc(iface) {
+		if err := runTC("qdisc", "add", "dev", iface, "root", "handle", "1:", "htb", "default", "999"); err != nil {
+			return fmt.Errorf("qdisc raiz em %s: %w", iface, err)
+		}
 	}
 	if err := runTC("class", "replace", "dev", iface, "parent", "1:", "classid", "1:1",
 		"htb", "rate", rate(noLimitCeilMbps, rateUnitMbit), "ceil", rate(noLimitCeilMbps, rateUnitMbit)); err != nil {
@@ -36,6 +48,17 @@ func ensureRootQdisc(iface string) error {
 		return fmt.Errorf("classe default 1:999 em %s: %w", iface, err)
 	}
 	return nil
+}
+
+// hasHTBRootQdisc verifica se a interface ja tem a qdisc raiz htb
+// (handle 1:) que ensureRootQdisc cria - ver o comentario ali sobre por
+// que isso e necessario (tc qdisc replace nao e idempotente para htb).
+func hasHTBRootQdisc(iface string) bool {
+	output, err := exec.Command("tc", "qdisc", "show", "dev", iface).CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(output), "qdisc htb 1: root")
 }
 
 // updateRootCeil atualiza so o teto da classe pai 1:1 (limite global)
@@ -52,11 +75,25 @@ func updateRootCeil(iface string, ceilValue int, ceilUnit string) error {
 	return nil
 }
 
+// deviceClassID monta o classid tc (major:minor) de um fwmark - o
+// "minor" de um classid tc e sempre interpretado em HEXADECIMAL pela
+// ferramenta (convencao propria do tc, independente da base usada no
+// "handle" do filtro fw abaixo, que e decimal - confirmado ao vivo
+// neste host). Formatar em decimal fazia qualquer fwmark >= 10000 virar
+// um classid > 0xffff ("Error: ... invalid class ID") - a sequence
+// hotspot_device_fwmark_seq comeca em 100 e so cresce (ver migration
+// 20260703000000_init_hotspot_shaping), entao isso quebrava a classe
+// HTB dedicada (e o shaping) de praticamente todo dispositivo depois
+// dos primeiros ~9900 vistos pelo Bindnet.
+func deviceClassID(fwmark int) string {
+	return fmt.Sprintf("1:%x", fwmark)
+}
+
 // ensureDeviceClass cria/atualiza a classe HTB dedicada de um
 // dispositivo (classid = fwmark, sempre dentro de 1:1) e o filtro que
 // classifica pacotes marcados com esse fwmark nela.
 func ensureDeviceClass(iface string, fwmark, rateValue int, rateUnitValue string) error {
-	classID := fmt.Sprintf("1:%d", fwmark)
+	classID := deviceClassID(fwmark)
 	if err := runTC("class", "replace", "dev", iface, "parent", "1:1", "classid", classID,
 		"htb", "rate", rate(minGuaranteedMbps, rateUnitMbit), "ceil", rate(rateValue, rateUnitValue)); err != nil {
 		return fmt.Errorf("classe %s em %s: %w", classID, iface, err)
@@ -74,7 +111,7 @@ func ensureDeviceClass(iface string, fwmark, rateValue int, rateUnitValue string
 func removeDeviceClass(iface string, fwmark int) {
 	_ = runTC("filter", "del", "dev", iface, "parent", "1:", "protocol", "ip", "pref", "1",
 		"handle", strconv.Itoa(fwmark), "fw")
-	_ = runTC("class", "del", "dev", iface, "classid", fmt.Sprintf("1:%d", fwmark))
+	_ = runTC("class", "del", "dev", iface, "classid", deviceClassID(fwmark))
 }
 
 // teardownRootQdisc remove a hierarquia HTB inteira de uma interface,

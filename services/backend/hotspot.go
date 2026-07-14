@@ -6,13 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"regexp"
 	"strings"
-)
-
-var (
-	channelRegex = regexp.MustCompile(`Canal automatico escolhido: (\d+)`)
-	bandRegex    = regexp.MustCompile(`Banda Wi-Fi automatica escolhida: ([\d.]+)GHz`)
 )
 
 func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *administrator, audit *auditClient, db *sql.DB) {
@@ -70,6 +64,15 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		// O worker desgerencia a placa fisica no NetworkManager (quando
+		// nao ha STA associada) internamente, bem em cima do "docker exec
+		// ... start" - ver unmanageWifiInterfaceIfIdle em
+		// services/worker/controller/compose.go. Fazer essa checagem
+		// aqui tambem, bem mais cedo, so alargava a janela entre a
+		// checagem e a tentativa real do create_ap (o hotspot ainda leva
+		// alguns segundos pra rodar de fato: ensureHotspotContainer,
+		// restart do dns-provider, espera do banco), dando tempo de sobra
+		// pra uma associacao Wi-Fi marginal cair entre as duas.
 		// O container do hotspot fica vivo; ligar/desligar controla apenas o
 		// servico AP interno. A configuracao operacional e lida pelo proprio
 		// hotspot na tabela hotspot_config, no momento do start/restart.
@@ -88,9 +91,21 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 	}))
 
 	mux.HandleFunc("POST /api/hotspot/stop", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		iface, ifaceErr := currentHotspotInterface(r.Context(), db)
 		if err := stopHotspotService(r.Context(), worker); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
+		}
+		if ifaceErr == nil {
+			// wifi-manage e idempotente (ver handleWifiManage no worker)
+			// mesmo quando o /start anterior nao chegou a desgerenciar a
+			// placa (cenario AP+STA, ver unmanageWifiInterfaceIfIdle em
+			// services/worker/controller/compose.go) - chamar sempre aqui
+			// garante que a placa nunca fique presa "unmanaged" no
+			// NetworkManager depois que o hotspot para.
+			if err := worker.call(r.Context(), http.MethodPost, "/network/wifi-manage", map[string]string{"interface": iface}, nil); err != nil {
+				log.Printf("[backend] aviso: falha ao devolver %s ao NetworkManager: %v", iface, err)
+			}
 		}
 		if err := setHotspotDesiredState(r.Context(), db, false); err != nil {
 			log.Printf("[backend] falha ao gravar estado desejado do hotspot (parado): %v", err)
@@ -134,11 +149,12 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 		if status.Running {
 			var logs strings.Builder
 			if err := worker.callText(r.Context(), "/containers/hotspot/logs?tail=200", &logs); err == nil {
-				if m := channelRegex.FindStringSubmatch(logs.String()); m != nil {
-					response["channel"] = m[1]
+				channel, band := parseHotspotChannelBand(logs.String())
+				if channel != "" {
+					response["channel"] = channel
 				}
-				if m := bandRegex.FindStringSubmatch(logs.String()); m != nil {
-					response["band"] = m[1]
+				if band != "" {
+					response["band"] = band
 				}
 			}
 		}
@@ -176,21 +192,4 @@ func startHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerCl
 		return err
 	}
 	return worker.call(ctx, http.MethodPost, "/hotspot/start", config, nil)
-}
-
-// currentHotspotInterface busca WIFI_INTERFACE configurado pelo painel - usada
-// tanto para ligar/desligar o hotspot quanto para listar clientes.
-func currentHotspotInterface(ctx context.Context, db *sql.DB) (string, error) {
-	return hotspotWifiInterface(ctx, db)
-}
-
-func stopHotspotService(ctx context.Context, worker *workerClient) error {
-	return worker.call(ctx, http.MethodPost, "/hotspot/stop", nil, nil)
-}
-
-func recoverWifiAdapter(ctx context.Context, worker *workerClient, iface string) error {
-	if err := stopHotspotService(ctx, worker); err != nil {
-		return err
-	}
-	return worker.call(ctx, http.MethodPost, "/network/wifi-manage", map[string]string{"interface": iface}, nil)
 }

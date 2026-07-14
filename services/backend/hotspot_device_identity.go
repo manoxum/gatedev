@@ -64,6 +64,6 @@ func registerHotspotDeviceIdentityRoute(mux *http.ServeMux, admin *administrator
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, false))
+		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, blockReasonNone))
 	}))
 }

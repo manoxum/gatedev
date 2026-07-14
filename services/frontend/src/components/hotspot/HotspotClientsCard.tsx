@@ -5,11 +5,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { SpeedGauge } from "@/components/ui/speed-gauge";
-import { toBitsPerSecond } from "@/components/hotspot/device-detail/DeviceSpeedCard";
+import { formatSpeedNow } from "@/components/hotspot/hotspot-limits-types";
 import { useClientsStats } from "@/components/hotspot/useHotspotQueries";
 import { DeviceIdentifyModal } from "@/components/hotspot/DeviceIdentifyModal";
 import type { HotspotBlockMode } from "@/components/hotspot/useHotspotMutations";
+
+// "manual" (bloqueio explicito do admin), "credit" (credito esgotado)
+// ou "quota" (cota de dados esgotada) - ver deviceBlockReason em
+// services/backend/hotspot_device_block_reason.go. "" ou ausente =
+// nao bloqueado.
+export type HotspotBlockReason = "manual" | "credit" | "quota" | "";
 
 export interface HotspotClient {
   mac: string;
@@ -21,8 +26,28 @@ export interface HotspotClient {
   confidence?: number;
   alias?: string;
   blocked?: boolean;
+  blockReason?: HotspotBlockReason;
   profileId?: string;
   profileName?: string;
+}
+
+// blockStatusLabel traduz blocked/blockReason num rotulo+variante de
+// Badge - reusado pela listagem (HotspotClientsCard) e pelo resumo do
+// dispositivo (DeviceOverviewTab.tsx), pra nunca os dois textos
+// divergirem.
+export function blockStatusLabel(client: Pick<HotspotClient, "blocked" | "blockReason">): {
+  label: string;
+  variant: "success" | "destructive";
+} {
+  if (!client.blocked) return { label: "Ativo", variant: "success" };
+  switch (client.blockReason) {
+    case "credit":
+      return { label: "Sem crédito", variant: "destructive" };
+    case "quota":
+      return { label: "Cota esgotada", variant: "destructive" };
+    default:
+      return { label: "Bloqueado", variant: "destructive" };
+  }
 }
 
 interface HotspotClientsCardProps {
@@ -96,13 +121,22 @@ export function HotspotClientsCard({
                   <span className="text-sm">{client.profileName || "Padrão"}</span>
                 </TableCell>
                 <TableCell>
-                  <div className="flex gap-2">
-                    <SpeedGauge valueBps={toBitsPerSecond(clientStats?.downloadBps ?? 0)} label="Down" size="sm" />
-                    <SpeedGauge valueBps={toBitsPerSecond(clientStats?.uploadBps ?? 0)} label="Up" size="sm" />
+                  <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                      {formatSpeedNow(clientStats?.downloadBps ?? 0, "bit")}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary/40" />
+                      {formatSpeedNow(clientStats?.uploadBps ?? 0, "bit")}
+                    </span>
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={client.blocked ? "destructive" : "success"}>{client.blocked ? "bloqueado" : "ativo"}</Badge>
+                  {(() => {
+                    const status = blockStatusLabel(client);
+                    return <Badge variant={status.variant}>{status.label}</Badge>;
+                  })()}
                 </TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-2">

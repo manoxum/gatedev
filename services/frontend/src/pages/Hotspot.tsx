@@ -75,6 +75,7 @@ export function HotspotPage() {
 
   const connectedCount = clients.data?.length ?? 0;
   const blockedCount = blocklist.data?.length ?? 0;
+  const blockedMacs = new Set(blocklist.data?.map((device) => device.macAddress) ?? []);
 
   usePageHeader({
     title: "Hotspot Wi-Fi",
@@ -121,7 +122,7 @@ export function HotspotPage() {
           </TabsTrigger>
           <TabsTrigger value="known" className="gap-2">
             <History className="h-4 w-4" />
-            Já conectados
+            Todos os dispositivos
           </TabsTrigger>
           <TabsTrigger value="limits">
             <Sliders className="h-4 w-4" />
@@ -161,7 +162,14 @@ export function HotspotPage() {
         </TabsContent>
 
         <TabsContent value="known" className="mt-0">
-          <HotspotKnownDevicesCard devices={knownDevices.data ?? []} />
+          <HotspotKnownDevicesCard
+            devices={knownDevices.data ?? []}
+            blockedMacs={blockedMacs}
+            blockPendingMac={block.isPending ? block.variables.mac : undefined}
+            unblockPendingMac={unblock.isPending ? unblock.variables : undefined}
+            onBlock={(mac, mode) => block.mutate({ mac, mode })}
+            onUnblock={(mac) => unblock.mutate(mac)}
+          />
         </TabsContent>
 
         <TabsContent value="limits" className="mt-0">

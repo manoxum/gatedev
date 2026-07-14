@@ -155,6 +155,18 @@ func redeemVoucher(ctx context.Context, db *sql.DB, worker *workerClient, code, 
 		return hotspotDeviceCredit{}, err
 	}
 
+	// Resgatar um voucher e a unica acao de auto-servico do usuario final
+	// (sem acesso ao painel para escolher o tipo de limitacao pela aba de
+	// limites) - por isso forca o dispositivo para o tipo "credito" aqui,
+	// preservando taxa/cota se ja houver override (ver setDeviceLimitType).
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO hotspot_device_limits (mac_address, limit_type)
+		VALUES ($1, $2)
+		ON CONFLICT (mac_address) DO UPDATE SET limit_type = EXCLUDED.limit_type, updated_at = CURRENT_TIMESTAMP
+	`, mac, limitTypeCredit); err != nil {
+		return hotspotDeviceCredit{}, err
+	}
+
 	var credit hotspotDeviceCredit
 	err = tx.QueryRowContext(ctx, `
 		UPDATE hotspot_device_credit

@@ -212,6 +212,7 @@ model HotspotGlobalLimits {
   uploadRateValue            Int?     @map("upload_rate_value")
   uploadRateUnit             String   @default("mbit") @map("upload_rate_unit")
   quotaBytes                 BigInt?  @map("quota_bytes")
+  quotaUnit                  String   @default("gbyte") @map("quota_unit")
   quotaPeriod                String?  @map("quota_period")
   quotaThrottleDownloadValue Int?     @map("quota_throttle_download_value")
   quotaThrottleDownloadUnit  String   @default("mbit") @map("quota_throttle_download_unit")
@@ -223,7 +224,15 @@ model HotspotGlobalLimits {
 }
 
 // Limite de trafego por dispositivo (mesma chave natural mac_address
-// de HotspotBlockedDevice/HotspotDeviceInfo). Ver hotspot_limits.go.
+// de HotspotBlockedDevice/HotspotDeviceInfo). Ver hotspot_device_limits.go.
+//
+// limitType/daily·weekly·monthlyQuotaBytes sao o shape novo (tipo
+// unico e mutuamente exclusivo - ver services/backend/hotspot_device_limits.go).
+// quotaBytes/quotaPeriod/quotaThrottle* sao o shape antigo: ficam no
+// banco por convencao (migrations deste repo nunca fazem DROP COLUMN,
+// ver 20260713000000_hotspot_limit_type/migration.sql), mas nao tem
+// mais leitor/escritor Go para device/perfil - so hotspot_global_limits
+// continua usando esse shape antigo por completo.
 model HotspotDeviceLimits {
   macAddress                 String   @id @map("mac_address")
   downloadRateValue          Int?     @map("download_rate_value")
@@ -236,9 +245,39 @@ model HotspotDeviceLimits {
   quotaThrottleDownloadUnit  String   @default("mbit") @map("quota_throttle_download_unit")
   quotaThrottleUploadValue   Int?     @map("quota_throttle_upload_value")
   quotaThrottleUploadUnit    String   @default("mbit") @map("quota_throttle_upload_unit")
-  updatedAt                  DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  limitType         String  @default("unlimited") @map("limit_type")
+  dailyQuotaBytes   BigInt? @map("daily_quota_bytes")
+  dailyQuotaUnit    String  @default("gbyte") @map("daily_quota_unit")
+  weeklyQuotaBytes  BigInt? @map("weekly_quota_bytes")
+  weeklyQuotaUnit   String  @default("gbyte") @map("weekly_quota_unit")
+  monthlyQuotaBytes BigInt? @map("monthly_quota_bytes")
+  monthlyQuotaUnit  String  @default("gbyte") @map("monthly_quota_unit")
+
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("hotspot_device_limits")
+}
+
+// Acumulador de uso do periodo corrente por (dispositivo, tipo de
+// periodo) - 1 linha por periodo efetivamente configurado (diario/
+// semanal/mensal), criada de forma preguicosa, mesmo padrao de
+// ensureDeviceCreditRow/ensureDeviceTrafficRow. "blocked" e bloqueio
+// rigido (nao throttle) ao estourar o teto daquele periodo - ver
+// services/backend/hotspot_device_quota_store.go.
+model HotspotDeviceQuotaPeriod {
+  id            BigInt   @id @default(autoincrement())
+  macAddress    String   @map("mac_address")
+  periodType    String   @map("period_type")
+  downloadBytes BigInt   @default(0) @map("download_bytes")
+  uploadBytes   BigInt   @default(0) @map("upload_bytes")
+  periodStart   DateTime @default(now()) @map("period_start") @db.Timestamptz
+  periodEnd     DateTime @default(now()) @map("period_end") @db.Timestamptz
+  blocked       Boolean  @default(false)
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@unique([macAddress, periodType])
+  @@map("hotspot_device_quota_periods")
 }
 
 // Acumulador de uso do periodo corrente para a cota global (singleton).
@@ -304,9 +343,12 @@ model HotspotDeviceCredit {
 }
 
 // Historico/extrato de mutacoes de saldo de credito por dispositivo -
-// recarga manual, recarga automatica, resgate de voucher e debito de
-// trafego (conta corrente de bytes). Sem relacao FK proposital (mesmo
-// padrao das demais tabelas hotspot_device_*).
+// recarga manual, recarga automatica e resgate de voucher. O debito de
+// trafego (entryType "debit") deixou de ser gravado aqui a partir da
+// sessao/trace em Mongo (ver HotspotDeviceSession abaixo e
+// hotspot_credit_debits no Mongo) - linhas "debit" antigas permanecem
+// so como historico. Sem relacao FK proposital (mesmo padrao das
+// demais tabelas hotspot_device_*).
 model HotspotDeviceCreditHistory {
   id                BigInt   @id @default(autoincrement())
   macAddress        String   @map("mac_address")
@@ -317,6 +359,25 @@ model HotspotDeviceCreditHistory {
 
   @@index([macAddress, createdAt])
   @@map("hotspot_device_credit_history")
+}
+
+// Ciclo conectado/desconectado de um dispositivo no hotspot (inicio,
+// fim, consumo total) - nasce quando o MAC aparece na lista de
+// clientes ao vivo e fecha quando some dela (ver
+// services/backend/hotspot_sessions.go). totalBytes e incrementado a
+// cada debito de credito gravado no Mongo (hotspot_credit_debits),
+// funcionando como o total consolidado que sobrevive mesmo depois do
+// TTL apagar o extrato bruto de lá.
+model HotspotDeviceSession {
+  id         BigInt    @id @default(autoincrement())
+  macAddress String    @map("mac_address")
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz
+  endedAt    DateTime? @map("ended_at") @db.Timestamptz
+  totalBytes BigInt    @default(0) @map("total_bytes")
+  updatedAt  DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@index([macAddress, startedAt])
+  @@map("hotspot_device_sessions")
 }
 
 // Perfil de dispositivo (services/backend/hotspot_profiles.go) - bundle
@@ -346,6 +407,17 @@ model HotspotProfile {
   creditRechargeAmountBytes BigInt?  @map("credit_recharge_amount_bytes")
   creditRechargePeriod      String?  @map("credit_recharge_period")
   creditPlafondBytes        BigInt?  @map("credit_plafond_bytes")
+
+  // Shape novo (ver comentario em HotspotDeviceLimits acima) - creditEnabled
+  // acima fica no banco sem uso do Go novo: limitType e que decide se a
+  // politica de credito (recharge/plafond, linhas acima) esta ativa.
+  limitType         String  @default("unlimited") @map("limit_type")
+  dailyQuotaBytes   BigInt? @map("daily_quota_bytes")
+  dailyQuotaUnit    String  @default("gbyte") @map("daily_quota_unit")
+  weeklyQuotaBytes  BigInt? @map("weekly_quota_bytes")
+  weeklyQuotaUnit   String  @default("gbyte") @map("weekly_quota_unit")
+  monthlyQuotaBytes BigInt? @map("monthly_quota_bytes")
+  monthlyQuotaUnit  String  @default("gbyte") @map("monthly_quota_unit")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz

@@ -1,25 +1,51 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Ban, ScanSearch, Settings2, Undo2, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DeviceIdentifyModal } from "@/components/hotspot/DeviceIdentifyModal";
 import type { HotspotKnownDevice } from "@/components/hotspot/useHotspotQueries";
+import type { HotspotBlockMode } from "@/components/hotspot/useHotspotMutations";
 
 interface HotspotKnownDevicesCardProps {
   devices: HotspotKnownDevice[];
+  blockedMacs: Set<string>;
+  blockPendingMac?: string;
+  unblockPendingMac?: string;
+  onBlock: (mac: string, mode: HotspotBlockMode) => void;
+  onUnblock: (mac: string) => void;
 }
 
 function deviceLabel(device: HotspotKnownDevice) {
   return device.alias || device.deviceName || device.vendor || "dispositivo desconhecido";
 }
 
-// Somente leitura - todo dispositivo que ja apareceu na lista de
-// clientes ao vivo alguma vez (ver recordDeviceSeen no backend),
-// diferente das listas de "conectados agora" e "bloqueados".
-export function HotspotKnownDevicesCard({ devices }: HotspotKnownDevicesCardProps) {
+// Mesmo padrão de listagem/ações da aba "Conectados"
+// (HotspotClientsCard.tsx), mas cobrindo todo dispositivo que já
+// apareceu na lista de clientes ao vivo alguma vez (ver
+// recordDeviceSeen no backend), não só os conectados agora. Bloquear/
+// cortar tráfego funcionam por MAC mesmo desconectado (bloqueio
+// preventivo); "Identificar" exige o dispositivo conectado agora, já
+// que depende de dados ao vivo (fingerprint DHCP) para um resultado
+// útil.
+export function HotspotKnownDevicesCard({
+  devices,
+  blockedMacs,
+  blockPendingMac,
+  unblockPendingMac,
+  onBlock,
+  onUnblock,
+}: HotspotKnownDevicesCardProps) {
+  const navigate = useNavigate();
+  const [identifyMac, setIdentifyMac] = useState<string | null>(null);
+  const identifyDevice = devices.find((device) => device.mac === identifyMac);
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Já conectados ({devices.length})</CardTitle>
-        <CardDescription>Todo dispositivo que já se conectou ao hotspot alguma vez, mesmo desconectado agora.</CardDescription>
+        <CardTitle>Todos os dispositivos ({devices.length})</CardTitle>
       </CardHeader>
       <CardContent>
         <Table>
@@ -29,26 +55,80 @@ export function HotspotKnownDevicesCard({ devices }: HotspotKnownDevicesCardProp
               <TableHead>MAC</TableHead>
               <TableHead>Primeira vez</TableHead>
               <TableHead>Última vez</TableHead>
-              <TableHead className="text-right">Status</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {devices.map((device) => (
-              <TableRow key={device.mac}>
-                <TableCell>{deviceLabel(device)}</TableCell>
-                <TableCell className="font-mono text-xs">{device.mac}</TableCell>
-                <TableCell>{device.firstSeenAt ? new Date(device.firstSeenAt).toLocaleString() : "—"}</TableCell>
-                <TableCell>{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : "—"}</TableCell>
-                <TableCell className="text-right">
-                  <Badge variant={device.connected ? "success" : "outline"}>
-                    {device.connected ? "conectado agora" : "desconectado"}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
+            {devices.map((device) => {
+              const blocked = blockedMacs.has(device.mac);
+              return (
+                <TableRow key={device.mac}>
+                  <TableCell>{deviceLabel(device)}</TableCell>
+                  <TableCell className="font-mono text-xs">{device.mac}</TableCell>
+                  <TableCell>{device.firstSeenAt ? new Date(device.firstSeenAt).toLocaleString() : "—"}</TableCell>
+                  <TableCell>{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant={blocked ? "destructive" : device.connected ? "success" : "outline"}>
+                      {blocked ? "bloqueado" : device.connected ? "conectado agora" : "desconectado"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate(`/hotspot/devices/${encodeURIComponent(device.mac)}`)}
+                      >
+                        <Settings2 className="h-4 w-4" />
+                        Ver detalhes
+                      </Button>
+                      {device.connected && (
+                        <Button variant="outline" size="sm" onClick={() => setIdentifyMac(device.mac)}>
+                          <ScanSearch className="h-4 w-4" />
+                          Identificar
+                        </Button>
+                      )}
+                      {blocked ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={unblockPendingMac === device.mac}
+                          onClick={() => onUnblock(device.mac)}
+                        >
+                          <Undo2 className="h-4 w-4" />
+                          Desbloquear
+                        </Button>
+                      ) : (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={blockPendingMac === device.mac}
+                            onClick={() => onBlock(device.mac, "traffic")}
+                          >
+                            <WifiOff className="h-4 w-4" />
+                            Cortar tráfego
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={blockPendingMac === device.mac}
+                            onClick={() => onBlock(device.mac, "deauth")}
+                          >
+                            <Ban className="h-4 w-4" />
+                            Bloquear
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
             {devices.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Nenhum dispositivo visto ainda.
                 </TableCell>
               </TableRow>
@@ -56,6 +136,11 @@ export function HotspotKnownDevicesCard({ devices }: HotspotKnownDevicesCardProp
           </TableBody>
         </Table>
       </CardContent>
+      <DeviceIdentifyModal
+        client={identifyDevice}
+        open={identifyMac !== null}
+        onOpenChange={(open) => !open && setIdentifyMac(null)}
+      />
     </Card>
   );
 }

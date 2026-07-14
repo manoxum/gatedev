@@ -94,6 +94,7 @@ services:
       MONGO_DB: ${MONGO_DB:-bindnet}
       MONGO_HOST: mongo
       MONGO_PORT: "27017"
+      HOTSPOT_CREDIT_TRACE_RETENTION_DAYS: ${HOTSPOT_CREDIT_TRACE_RETENTION_DAYS:-180}
       MINIO_HOST: minio
       MINIO_PORT: "9000"
       CA_COMMON_NAME: ${CA_COMMON_NAME:-Bindnet Local Development CA}

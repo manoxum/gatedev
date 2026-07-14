@@ -1,8 +1,16 @@
+import { lazy, Suspense } from "react";
 import { Flag, Globe, Hash, Play, RefreshCw, Router, Settings2, Square, Waves, Wifi, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { HotspotWifiQr } from "@/components/hotspot/HotspotWifiQr";
+
+// Carregado sob demanda: puxa o ApexCharts (~170KB gzip), que so faz
+// sentido pagar em paginas de hotspot, nao no bundle principal
+// carregado em toda rota do painel.
+const HotspotGlobalSpeedPanel = lazy(() =>
+  import("@/components/hotspot/HotspotGlobalSpeedPanel").then((m) => ({ default: m.HotspotGlobalSpeedPanel })),
+);
 
 interface HotspotSummaryCardProps {
   config: Record<string, string>;
@@ -16,15 +24,18 @@ interface HotspotSummaryCardProps {
   onEdit: () => void;
 }
 
+// Compacto de proposito (icone menor, menos padding, texto menor): o
+// espaco poupado aqui sobra pro painel geral de velocidade
+// (HotspotGlobalSpeedPanel) a direita, no mesmo CardContent.
 function ConfigItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 transition-colors hover:bg-muted/60">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-        <Icon className="h-4 w-4" />
+    <div className="flex items-center gap-2 rounded-lg border border-border/60 bg-muted/30 px-2 py-1.5 transition-colors hover:bg-muted/60">
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+        <Icon className="h-3.5 w-3.5" />
       </div>
       <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="truncate text-sm font-semibold">{value || "—"}</p>
+        <p className="text-[10px] leading-tight text-muted-foreground">{label}</p>
+        <p className="truncate text-xs font-semibold leading-tight">{value || "—"}</p>
       </div>
     </div>
   );
@@ -80,15 +91,20 @@ export function HotspotSummaryCard({
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col gap-6 pt-5 sm:flex-row sm:items-stretch sm:justify-between">
+      <CardContent className="flex flex-col gap-4 pt-5 lg:flex-row lg:items-stretch lg:justify-between">
         {ssid && password && <HotspotWifiQr ssid={ssid} password={password} />}
-        <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:w-auto lg:shrink-0">
           <ConfigItem icon={Wifi} label="SSID" value={ssid} />
           <ConfigItem icon={Router} label="Interface Wi-Fi" value={config.WIFI_INTERFACE ?? ""} />
           <ConfigItem icon={Globe} label="Interface de internet" value={config.INTERNET_INTERFACE ?? ""} />
           <ConfigItem icon={Flag} label="País" value={config.WIFI_COUNTRY ?? ""} />
           <ConfigItem icon={Waves} label="Banda" value={config.WIFI_FREQ_BAND ?? ""} />
           <ConfigItem icon={Hash} label="Canal" value={config.WIFI_CHANNEL ?? ""} />
+        </div>
+        <div className="flex min-w-0 flex-1 items-stretch">
+          <Suspense fallback={<div className="h-full min-h-[140px] w-full animate-pulse rounded-xl bg-muted/30" />}>
+            <HotspotGlobalSpeedPanel />
+          </Suspense>
         </div>
       </CardContent>
     </Card>

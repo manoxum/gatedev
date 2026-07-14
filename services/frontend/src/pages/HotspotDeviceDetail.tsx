@@ -1,34 +1,77 @@
+import { lazy, Suspense, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, CreditCard, LayoutGrid, Sliders } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/bindnets/EmptyState";
 import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
 import { DeviceOverviewTab } from "@/components/hotspot/device-detail/DeviceOverviewTab";
 import { DeviceLimitsTab } from "@/components/hotspot/device-detail/DeviceLimitsTab";
 import { DeviceCreditCard } from "@/components/hotspot/device-detail/DeviceCreditCard";
-import { DeviceCreditHistoryCard } from "@/components/hotspot/device-detail/DeviceCreditHistoryCard";
-import { DeviceSpeedCard } from "@/components/hotspot/device-detail/DeviceSpeedCard";
+import { DeviceMovementsCard } from "@/components/hotspot/device-detail/DeviceMovementsCard";
+import { DeviceSpeedGaugeCard } from "@/components/hotspot/device-detail/DeviceSpeedGaugeCard";
+import { SPEED_CHART_DEFAULT_WINDOW_MINUTES } from "@/components/hotspot/device-detail/speed-chart-windows";
 import { usePageHeader } from "@/hooks/usePageHeader";
+import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
+import type { ByteNature } from "@/components/hotspot/hotspot-limits-types";
+
+// Carregado sob demanda: puxa o ApexCharts (~170KB gzip), que so faz
+// sentido pagar em paginas de hotspot, nao no bundle principal
+// carregado em toda rota do painel.
+const DeviceSpeedChart = lazy(() =>
+  import("@/components/hotspot/device-detail/DeviceSpeedChart").then((m) => ({ default: m.DeviceSpeedChart })),
+);
+
+// Dispositivo desconectado no momento nao aparece em `clients` (lista
+// ao vivo), so em `knownDevices` (todo MAC que ja apareceu alguma vez -
+// ver HotspotKnownDevicesCard.tsx) - monta um HotspotClient equivalente
+// a partir dali (sem ip/hostname/perfil ao vivo) pra essa pagina
+// continuar funcionando mesmo offline, em vez de so mostrar "nao
+// encontrado".
+function knownDeviceAsClient(
+  known: NonNullable<ReturnType<typeof useHotspotQueries>["knownDevices"]["data"]>[number],
+  blocked: boolean,
+): HotspotClient {
+  return {
+    mac: known.mac,
+    ip: "",
+    hostname: "",
+    vendor: known.vendor,
+    deviceName: known.deviceName,
+    osName: known.osName,
+    alias: known.alias,
+    blocked,
+  };
+}
 
 export function HotspotDeviceDetailPage() {
   const { mac: macParam } = useParams();
   const navigate = useNavigate();
   const mac = macParam ? decodeURIComponent(macParam) : "";
+  // Levantado pro pai (nao um useState local em DeviceSpeedChart.tsx)
+  // pra o velocimetro ao lado (DeviceSpeedGaugeCard.tsx) mostrar o
+  // valor na mesma unidade escolhida no grafico.
+  const [windowMinutes, setWindowMinutes] = useState(SPEED_CHART_DEFAULT_WINDOW_MINUTES);
+  const [unitNature, setUnitNature] = useState<ByteNature>("bit");
 
-  const { clients } = useHotspotQueries();
-  const client = clients.data?.find((candidate) => candidate.mac === mac);
+  const { clients, knownDevices, blocklist } = useHotspotQueries();
+  const liveClient = clients.data?.find((candidate) => candidate.mac === mac);
+  const knownDevice = knownDevices.data?.find((candidate) => candidate.mac === mac);
+  const blocked = blocklist.data?.some((device) => device.macAddress === mac) ?? false;
+  const client = liveClient ?? (knownDevice ? knownDeviceAsClient(knownDevice, blocked) : undefined);
+  const loading = clients.isLoading || knownDevices.isLoading;
 
   usePageHeader({ title: client?.alias || client?.deviceName || client?.vendor || mac, description: client?.ip });
 
-  if (!clients.isLoading && !client) {
+  if (!loading && !client) {
     return (
       <div className="space-y-4">
         <Button variant="ghost" onClick={() => navigate("/hotspot")}>
           <ArrowLeft className="h-4 w-4" />
           Voltar
         </Button>
-        <EmptyState label="Dispositivo não encontrado (pode ter se desconectado)." />
+        <EmptyState label="Dispositivo não encontrado (nunca se conectou ao hotspot)." />
       </div>
     );
   }
@@ -44,9 +87,12 @@ export function HotspotDeviceDetailPage() {
           <ArrowLeft className="h-4 w-4" />
           Hotspot
         </Button>
-        <div>
-          <h1 className="text-2xl font-semibold">{client.alias || client.deviceName || client.vendor || "Dispositivo"}</h1>
-          <p className="font-mono text-sm text-muted-foreground">{client.mac}</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold">{client.alias || client.deviceName || client.vendor || "Dispositivo"}</h1>
+            <p className="font-mono text-sm text-muted-foreground">{client.mac}</p>
+          </div>
+          {!liveClient && <Badge variant="outline">desconectado</Badge>}
         </div>
       </div>
 
@@ -62,11 +108,24 @@ export function HotspotDeviceDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="credit">
             <CreditCard className="h-4 w-4" />
-            Crédito
+            Movimentações
           </TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="space-y-4">
-          <DeviceSpeedCard mac={client.mac} />
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+            <div className="lg:flex-1">
+              <Suspense fallback={<div className="h-64 animate-pulse rounded-lg border bg-muted/30" />}>
+                <DeviceSpeedChart
+                  mac={client.mac}
+                  windowMinutes={windowMinutes}
+                  onWindowChange={setWindowMinutes}
+                  unitNature={unitNature}
+                  onUnitChange={setUnitNature}
+                />
+              </Suspense>
+            </div>
+            <DeviceSpeedGaugeCard mac={client.mac} unitNature={unitNature} />
+          </div>
           <DeviceOverviewTab client={client} />
         </TabsContent>
         <TabsContent value="limits">
@@ -74,7 +133,7 @@ export function HotspotDeviceDetailPage() {
         </TabsContent>
         <TabsContent value="credit" className="space-y-4">
           <DeviceCreditCard mac={client.mac} />
-          <DeviceCreditHistoryCard mac={client.mac} />
+          <DeviceMovementsCard mac={client.mac} />
         </TabsContent>
       </Tabs>
     </div>

@@ -14,20 +14,30 @@ import (
 // idempotentes sob demanda, mesma filosofia de reapplyHotspotBlocklist.
 // Roda para sempre (goroutine de fundo, iniciada em main.go); erros por
 // dispositivo so logam e nao abortam o ciclo inteiro.
-func startHotspotReconciliationLoop(db *sql.DB, worker *workerClient, interval time.Duration) {
+func startHotspotReconciliationLoop(db *sql.DB, worker *workerClient, audit *auditClient, interval time.Duration) {
 	ctx := context.Background()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for range ticker.C {
-		reconcileHotspotOnce(ctx, db, worker)
+		reconcileHotspotOnce(ctx, db, worker, audit)
 	}
 }
 
-func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerClient) {
+func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerClient, audit *auditClient) {
 	var status struct {
 		Running bool `json:"running"`
 	}
-	if err := worker.call(ctx, http.MethodGet, "/hotspot/status", nil, &status); err != nil || !status.Running {
+	if err := worker.call(ctx, http.MethodGet, "/hotspot/status", nil, &status); err != nil {
+		return
+	}
+	if !status.Running {
+		// Hotspot parado: ninguem pode estar conectado, fecha toda
+		// sessao em aberto (ver closeStaleSessions em
+		// hotspot_sessions.go).
+		if err := closeStaleSessions(db, nil); err != nil {
+			log.Printf("[backend] reconciliacao: falha ao fechar sessoes com hotspot parado: %v", err)
+		}
+		recoverHotspotIfDesired(ctx, db, worker, audit)
 		return
 	}
 
@@ -42,8 +52,16 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerClient)
 		return
 	}
 
+	liveMacs := make([]string, len(clients))
+	for i, client := range clients {
+		liveMacs[i] = client.MAC
+	}
+	if err := closeStaleSessions(db, liveMacs); err != nil {
+		log.Printf("[backend] reconciliacao: falha ao fechar sessoes desconectadas: %v", err)
+	}
+
 	for _, client := range clients {
-		if err := reconcileDevice(ctx, db, worker, iface, client.MAC, client.IP); err != nil {
+		if err := reconcileDeviceShaping(ctx, db, worker, iface, client.MAC, client.IP); err != nil {
 			log.Printf("[backend] reconciliacao do dispositivo %s falhou: %v", client.MAC, err)
 		}
 	}
@@ -56,10 +74,45 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerClient)
 	}
 }
 
-// reconcileDevice reaplica shaping (resolve renovacao de DHCP sozinho,
-// reenviando o IP atual), atualiza o acumulado de cota/credito do
-// dispositivo e ativa/desativa throttle e bloqueio conforme necessario.
-func reconcileDevice(ctx context.Context, db *sql.DB, worker *workerClient, iface, mac, ip string) error {
+// recoverHotspotIfDesired religa o hotspot sozinho quando ele cai sem
+// que o admin tenha pedido (ex.: watchdog de falha de beacon em
+// services/worker/hotspot/watchdog.sh derrubando o create_ap travado)
+// - so age se a ultima intencao registrada foi ligar
+// (hotspotDesiredStateRunning, a mesma usada por
+// autoStartHotspotOnBoot), senao um "parar" deliberado pelo painel
+// seria desfeito no proximo ciclo deste loop.
+func recoverHotspotIfDesired(ctx context.Context, db *sql.DB, worker *workerClient, audit *auditClient) {
+	desired, err := hotspotDesiredStateRunning(ctx, db)
+	if err != nil {
+		log.Printf("[backend] reconciliacao: falha ao ler estado desejado do hotspot: %v", err)
+		return
+	}
+	if !desired {
+		return
+	}
+
+	iface, err := currentHotspotInterface(ctx, db)
+	if err != nil {
+		log.Printf("[backend] reconciliacao: falha ao ler WIFI_INTERFACE para religar o hotspot: %v", err)
+		return
+	}
+	if err := startHotspotAndReapply(ctx, db, worker, audit, iface, "sistema (auto-recuperacao)"); err != nil {
+		log.Printf("[backend] reconciliacao: falha ao religar hotspot automaticamente: %v", err)
+		return
+	}
+	log.Println("[backend] hotspot religado automaticamente apos queda detectada pela reconciliacao")
+}
+
+// reconcileDeviceShaping reaplica shaping (resolve renovacao de DHCP
+// sozinho, reenviando o IP atual) e ativa/desativa bloqueio manual em
+// modo "traffic" - roda no ciclo de 15s (startHotspotReconciliationLoop).
+// A leitura de trafego/velocidade/cota/credito, que precisa de cadencia
+// bem mais curta pra alimentar o grafico "ao vivo", roda separada em
+// reconcileDeviceUsage (hotspot_usage_sampling.go).
+func reconcileDeviceShaping(ctx context.Context, db *sql.DB, worker *workerClient, iface, mac, ip string) error {
+	if err := ensureOpenSession(db, mac); err != nil {
+		return err
+	}
 	if err := ensureDeviceShaping(ctx, db, worker, iface, mac, ip); err != nil {
 		return err
 	}
@@ -73,88 +126,28 @@ func reconcileDevice(ctx context.Context, db *sql.DB, worker *workerClient, ifac
 	} else if blocked && mode == "traffic" {
 		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)
 	}
-
-	download, upload, err := readDeviceShapingStats(ctx, worker, mac)
-	if err != nil {
-		return err
-	}
-	deltaDown, deltaUp, err := recordDeviceUsage(db, mac, download, upload)
-	if err != nil {
-		return err
-	}
-
-	limits, err := effectiveDeviceLimits(db, mac)
-	if err != nil {
-		return err
-	}
-	if limits.QuotaPeriod != nil {
-		if err := resetDevicePeriodIfExpired(db, mac, *limits.QuotaPeriod); err != nil {
-			return err
-		}
-	}
-	traffic, err := ensureDeviceTrafficRow(db, mac)
-	if err != nil {
-		return err
-	}
-	exceeded := deviceQuotaExceeded(limits, traffic)
-	if exceeded != traffic.Throttled {
-		if err := setDeviceThrottled(db, mac, exceeded); err != nil {
-			return err
-		}
-		if err := ensureDeviceShaping(ctx, db, worker, iface, mac, ip); err != nil {
-			return err
-		}
-	}
-
-	return reconcileDeviceCredit(ctx, db, worker, mac, ip, deltaDown+deltaUp)
-}
-
-// reconcileDeviceCredit desconta o trafego deste ciclo do saldo de
-// credito (so quando habilitado) e bloqueia ao vivo assim que o saldo
-// zera - desbloquear e responsabilidade exclusiva de uma recarga
-// (manual ou automatica), nunca deste loop. Enquanto o dispositivo
-// continuar bloqueado por credito, reforca o bloqueio a cada ciclo
-// (auto-cura): o hotspot flusha o chain BINDNET-HOTSPOT a cada
-// start/apply, o que apagaria as regras DROP junto - reenviar aqui,
-// mesmo idioma ja usado por ensureDeviceShaping.
-func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerClient, mac, ip string, totalBytes int64) error {
-	credit, err := syncDeviceCreditFromProfile(ctx, db, worker, mac)
-	if err != nil {
-		return err
-	}
-	if !credit.Enabled {
-		return nil
-	}
-	if credit.BlockedByCredit {
-		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)
-		applyCaptivePortalRedirect(ctx, db, worker, mac, true)
-	}
-	if totalBytes == 0 {
-		return nil
-	}
-	newBalance, err := debitDeviceCredit(db, mac, totalBytes)
-	if err != nil {
-		return err
-	}
-	if newBalance <= 0 && !credit.BlockedByCredit {
-		if err := blockDeviceForCredit(db, mac); err != nil {
-			return err
-		}
-		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)
-		applyCaptivePortalRedirect(ctx, db, worker, mac, true)
-	}
 	return nil
 }
 
+// reconcileGlobal decide throttle/shaping a partir do acumulado global
+// ja atualizado - a leitura dos contadores/gravacao do delta
+// (recordGlobalUsage) roda separada, a 1s, em reconcileGlobalUsage
+// (hotspot_usage_sampling.go), mesma divisao de responsabilidade que
+// reconcileDeviceShaping (15s, aqui) x reconcileDeviceUsage (1s) - dois
+// lugares chamando recordGlobalUsage pro mesmo contador consumiriam a
+// mesma janela de delta um do outro.
+//
+// applyGlobalShaping roda TODO ciclo, nao so quando o throttle muda de
+// estado: e a unica reaplicacao periodica das regras de contagem
+// globais (bn-global-up/down) e da qdisc - sem isso, se elas se
+// perdessem uma vez (ex.: container do hotspot reiniciado sem o admin
+// tocar no limite global, unico outro gatilho que chama
+// applyGlobalShaping), ficavam perdidas para sempre, e o velocimetro/
+// grafico geral (useGlobalStats/useGlobalSpeedHistory) travava em
+// 0bps indefinidamente. ensureRootQdisc/ensureGlobalCounterRule ja sao
+// idempotentes, mesmo espirito de ensureDeviceShaping (chamada todo
+// ciclo por dispositivo, ver reconcileDeviceShaping acima).
 func reconcileGlobal(ctx context.Context, db *sql.DB, worker *workerClient, iface string) error {
-	download, upload, err := readDeviceShapingStats(ctx, worker, "")
-	if err != nil {
-		return err
-	}
-	if err := recordGlobalUsage(db, download, upload); err != nil {
-		return err
-	}
-
 	limits, err := getGlobalLimits(db)
 	if err != nil {
 		return err
@@ -169,11 +162,11 @@ func reconcileGlobal(ctx context.Context, db *sql.DB, worker *workerClient, ifac
 		return err
 	}
 	exceeded := globalQuotaExceeded(limits, traffic)
-	if exceeded == traffic.Throttled {
-		return nil
-	}
-	if err := setGlobalThrottled(db, exceeded); err != nil {
-		return err
+	if exceeded != traffic.Throttled {
+		if err := setGlobalThrottled(db, exceeded); err != nil {
+			return err
+		}
+		traffic.Throttled = exceeded
 	}
 	downloadRate, uploadRate := effectiveGlobalRates(limits, traffic)
 	return applyGlobalShaping(ctx, worker, iface, downloadRate, uploadRate)

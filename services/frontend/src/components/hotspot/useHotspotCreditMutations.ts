@@ -4,7 +4,6 @@ import { api, ApiError } from "@/lib/api";
 import type { QuotaPeriod } from "@/components/hotspot/hotspot-limits-types";
 
 export interface DeviceCreditConfig {
-  enabled: boolean;
   rechargeAmountBytes: number | null;
   rechargePeriod: QuotaPeriod | null;
   plafondBytes: number | null;

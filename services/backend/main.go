@@ -41,7 +41,14 @@ func main() {
 	}
 	defer audit.disconnect(context.Background())
 
+	creditTrace, err := openCreditTrace(context.Background(), audit.client)
+	if err != nil {
+		log.Fatalf("[backend] erro ao preparar trace de consumo de credito no Mongo: %v", err)
+	}
+
 	worker := newWorkerClient(getenv("WORKER_SOCKET", "/run/bindnet-admin/worker.sock"))
+
+	speedHistory := newDeviceSpeedHistoryStore()
 
 	mux := http.NewServeMux()
 	registerSetupRoutes(mux, admin, db, audit)
@@ -51,10 +58,14 @@ func main() {
 	registerHotspotDeviceRoutes(mux, admin, db, worker)
 	registerHotspotDeviceHistoryRoutes(mux, admin, db, worker)
 	registerHotspotBlocklistRoutes(mux, admin, db, worker)
-	registerHotspotLimitRoutes(mux, admin, db, worker)
+	registerHotspotGlobalLimitRoutes(mux, admin, db, worker)
+	registerHotspotDeviceLimitRoutes(mux, admin, db, worker)
+	registerHotspotDeviceQuotaRoutes(mux, admin, db, worker, audit)
+	registerHotspotDeviceSpeedHistoryRoutes(mux, admin, speedHistory)
 	registerHotspotTrafficRoutes(mux, admin, db)
 	registerHotspotCreditRoutes(mux, admin, db, worker, audit)
 	registerHotspotCreditHistoryRoutes(mux, admin, db)
+	registerHotspotSessionRoutes(mux, admin, db, creditTrace)
 	registerHotspotStatsRoutes(mux, admin, db, worker)
 	registerHotspotProfileRoutes(mux, admin, db, worker, audit)
 	registerHotspotVoucherRoutes(mux, admin, db, audit)
@@ -67,7 +78,8 @@ func main() {
 	registerNginxUIRoutes(mux, admin)
 
 	go autoStartHotspotOnBoot(db, worker, audit)
-	go startHotspotReconciliationLoop(db, worker, 15*time.Second)
+	go startHotspotReconciliationLoop(db, worker, audit, 15*time.Second)
+	go startHotspotUsageSamplingLoop(db, worker, creditTrace, speedHistory, time.Second)
 
 	port := getenv("BACKEND_PORT", "8090")
 	log.Println("[backend] ouvindo em :" + port)

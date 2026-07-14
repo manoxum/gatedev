@@ -20,7 +20,6 @@ type hotspotProfile struct {
 	Name      string `json:"name"`
 	IsDefault bool   `json:"isDefault"`
 	hotspotLimits
-	CreditEnabled             bool    `json:"creditEnabled"`
 	CreditRechargeAmountBytes *int64  `json:"creditRechargeAmountBytes"`
 	CreditRechargePeriod      *string `json:"creditRechargePeriod"`
 	CreditPlafondBytes        *int64  `json:"creditPlafondBytes"`
@@ -29,7 +28,6 @@ type hotspotProfile struct {
 type hotspotProfileRequest struct {
 	Name string `json:"name"`
 	hotspotLimits
-	CreditEnabled             bool    `json:"creditEnabled"`
 	CreditRechargeAmountBytes *int64  `json:"creditRechargeAmountBytes"`
 	CreditRechargePeriod      *string `json:"creditRechargePeriod"`
 	CreditPlafondBytes        *int64  `json:"creditPlafondBytes"`
@@ -54,6 +52,10 @@ func registerHotspotProfileRoutes(mux *http.ServeMux, admin *administrator, db *
 		var req hotspotProfileRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 			http.Error(w, "campo 'name' obrigatorio", http.StatusBadRequest)
+			return
+		}
+		if req.LimitType != "" && !isValidLimitType(req.LimitType, true) {
+			http.Error(w, "campo 'limitType' invalido", http.StatusBadRequest)
 			return
 		}
 		profile, err := insertProfile(db, req)
@@ -91,6 +93,10 @@ func registerHotspotProfileRoutes(mux *http.ServeMux, admin *administrator, db *
 		var req hotspotProfileRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 			http.Error(w, "campo 'name' obrigatorio", http.StatusBadRequest)
+			return
+		}
+		if req.LimitType != "" && !isValidLimitType(req.LimitType, true) {
+			http.Error(w, "campo 'limitType' invalido", http.StatusBadRequest)
 			return
 		}
 		profile, found, err := updateProfile(db, id, req)

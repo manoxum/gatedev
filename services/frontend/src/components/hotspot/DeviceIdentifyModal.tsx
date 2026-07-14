@@ -5,10 +5,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useIdentifyDevice, useUpdateDeviceIdentity } from "@/components/hotspot/useHotspotMutations";
-import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
+
+// Forma minima aceita pelo modal: tanto HotspotClient (lista de
+// conectados) quanto HotspotKnownDevice (lista de todos os
+// dispositivos) satisfazem essa interface.
+export interface IdentifiableDevice {
+  mac: string;
+  alias?: string;
+  vendor?: string;
+  deviceName?: string;
+  osName?: string;
+}
 
 interface DeviceIdentifyModalProps {
-  client: HotspotClient | undefined;
+  client: IdentifiableDevice | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -20,7 +30,7 @@ interface FormState {
   osName: string;
 }
 
-function formStateFromClient(client: HotspotClient | undefined): FormState {
+function formStateFromClient(client: IdentifiableDevice | undefined): FormState {
   return {
     alias: client?.alias ?? "",
     vendor: client?.vendor ?? "",
@@ -30,10 +40,12 @@ function formStateFromClient(client: HotspotClient | undefined): FormState {
 }
 
 // Modal aberto pelo botão "Identificar" da lista de clientes
-// (HotspotClientsCard.tsx): permite preencher alias/marca/modelo/SO à
-// mão, ou pedir a identificação automática (fabricante via MAC,
-// fingerprint DHCP, heurística de SO) e ajustar o resultado antes de
-// salvar - ver PATCH /api/hotspot/devices/{mac}/identity.
+// conectados (HotspotClientsCard.tsx) ou da lista de todos os
+// dispositivos (HotspotKnownDevicesCard.tsx): permite preencher
+// alias/marca/modelo/SO à mão, ou pedir a identificação automática
+// (fabricante via MAC, fingerprint DHCP, heurística de SO) e ajustar
+// o resultado antes de salvar - ver
+// PATCH /api/hotspot/devices/{mac}/identity.
 export function DeviceIdentifyModal({ client, open, onOpenChange }: DeviceIdentifyModalProps) {
   const [form, setForm] = useState<FormState>(() => formStateFromClient(client));
   const identify = useIdentifyDevice();

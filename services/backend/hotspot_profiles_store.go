@@ -21,24 +21,22 @@ var errHotspotProfileIsDefault = errors.New("o perfil padrao nao pode ser removi
 const profileColumns = `
 	id, name, is_default,
 	download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
-	quota_bytes, quota_period,
-	quota_throttle_download_value, quota_throttle_download_unit,
-	quota_throttle_upload_value, quota_throttle_upload_unit,
-	credit_enabled, credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes
+	limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
+	monthly_quota_bytes, monthly_quota_unit,
+	credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes
 `
 
 func scanProfile(row interface{ Scan(...any) error }) (hotspotProfile, error) {
 	var p hotspotProfile
 	err := row.Scan(&p.ID, &p.Name, &p.IsDefault,
 		&p.DownloadRateValue, &p.DownloadRateUnit, &p.UploadRateValue, &p.UploadRateUnit,
-		&p.QuotaBytes, &p.QuotaPeriod,
-		&p.QuotaThrottleDownloadValue, &p.QuotaThrottleDownloadUnit,
-		&p.QuotaThrottleUploadValue, &p.QuotaThrottleUploadUnit,
-		&p.CreditEnabled, &p.CreditRechargeAmountBytes, &p.CreditRechargePeriod, &p.CreditPlafondBytes)
+		&p.LimitType, &p.DailyQuotaBytes, &p.DailyQuotaUnit, &p.WeeklyQuotaBytes, &p.WeeklyQuotaUnit,
+		&p.MonthlyQuotaBytes, &p.MonthlyQuotaUnit,
+		&p.CreditRechargeAmountBytes, &p.CreditRechargePeriod, &p.CreditPlafondBytes)
 	if err != nil {
 		return hotspotProfile{}, err
 	}
-	p.hotspotLimits = normalizeLimitUnits(p.hotspotLimits)
+	p.hotspotLimits = normalizeDeviceLimitUnits(p.hotspotLimits)
 	return p, nil
 }
 
@@ -72,22 +70,20 @@ func getProfile(db *sql.DB, id string) (hotspotProfile, bool, error) {
 }
 
 func insertProfile(db *sql.DB, req hotspotProfileRequest) (hotspotProfile, error) {
-	req.hotspotLimits = normalizeLimitUnits(req.hotspotLimits)
+	req.hotspotLimits = normalizeDeviceLimitUnits(req.hotspotLimits)
 	profile, err := scanProfile(db.QueryRow(`
 		INSERT INTO hotspot_profiles (
 			name, download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
-			quota_bytes, quota_period,
-			quota_throttle_download_value, quota_throttle_download_unit,
-			quota_throttle_upload_value, quota_throttle_upload_unit,
-			credit_enabled, credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes
+			limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
+			monthly_quota_bytes, monthly_quota_unit,
+			credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING `+profileColumns,
 		req.Name, req.DownloadRateValue, req.DownloadRateUnit, req.UploadRateValue, req.UploadRateUnit,
-		req.QuotaBytes, req.QuotaPeriod,
-		req.QuotaThrottleDownloadValue, req.QuotaThrottleDownloadUnit,
-		req.QuotaThrottleUploadValue, req.QuotaThrottleUploadUnit,
-		req.CreditEnabled, req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
+		req.LimitType, req.DailyQuotaBytes, req.DailyQuotaUnit, req.WeeklyQuotaBytes, req.WeeklyQuotaUnit,
+		req.MonthlyQuotaBytes, req.MonthlyQuotaUnit,
+		req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
 	))
 	if isUniqueViolation(err) {
 		return hotspotProfile{}, errHotspotProfileNameTaken
@@ -96,22 +92,20 @@ func insertProfile(db *sql.DB, req hotspotProfileRequest) (hotspotProfile, error
 }
 
 func updateProfile(db *sql.DB, id string, req hotspotProfileRequest) (hotspotProfile, bool, error) {
-	req.hotspotLimits = normalizeLimitUnits(req.hotspotLimits)
+	req.hotspotLimits = normalizeDeviceLimitUnits(req.hotspotLimits)
 	profile, err := scanProfile(db.QueryRow(`
 		UPDATE hotspot_profiles
 		SET name = $2, download_rate_value = $3, download_rate_unit = $4, upload_rate_value = $5, upload_rate_unit = $6,
-		    quota_bytes = $7, quota_period = $8,
-		    quota_throttle_download_value = $9, quota_throttle_download_unit = $10,
-		    quota_throttle_upload_value = $11, quota_throttle_upload_unit = $12,
-		    credit_enabled = $13, credit_recharge_amount_bytes = $14, credit_recharge_period = $15, credit_plafond_bytes = $16,
+		    limit_type = $7, daily_quota_bytes = $8, daily_quota_unit = $9, weekly_quota_bytes = $10, weekly_quota_unit = $11,
+		    monthly_quota_bytes = $12, monthly_quota_unit = $13,
+		    credit_recharge_amount_bytes = $14, credit_recharge_period = $15, credit_plafond_bytes = $16,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1
 		RETURNING `+profileColumns,
 		id, req.Name, req.DownloadRateValue, req.DownloadRateUnit, req.UploadRateValue, req.UploadRateUnit,
-		req.QuotaBytes, req.QuotaPeriod,
-		req.QuotaThrottleDownloadValue, req.QuotaThrottleDownloadUnit,
-		req.QuotaThrottleUploadValue, req.QuotaThrottleUploadUnit,
-		req.CreditEnabled, req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
+		req.LimitType, req.DailyQuotaBytes, req.DailyQuotaUnit, req.WeeklyQuotaBytes, req.WeeklyQuotaUnit,
+		req.MonthlyQuotaBytes, req.MonthlyQuotaUnit,
+		req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
 	))
 	if isUniqueViolation(err) {
 		return hotspotProfile{}, false, errHotspotProfileNameTaken
@@ -158,39 +152,19 @@ func getProfileLimits(db *sql.DB, id string) (hotspotLimits, bool, error) {
 	var limits hotspotLimits
 	err := db.QueryRow(`
 		SELECT download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
-		       quota_bytes, quota_period,
-		       quota_throttle_download_value, quota_throttle_download_unit,
-		       quota_throttle_upload_value, quota_throttle_upload_unit
+		       limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
+		       monthly_quota_bytes, monthly_quota_unit
 		FROM hotspot_profiles WHERE id = $1
 	`, id).Scan(&limits.DownloadRateValue, &limits.DownloadRateUnit, &limits.UploadRateValue, &limits.UploadRateUnit,
-		&limits.QuotaBytes, &limits.QuotaPeriod,
-		&limits.QuotaThrottleDownloadValue, &limits.QuotaThrottleDownloadUnit,
-		&limits.QuotaThrottleUploadValue, &limits.QuotaThrottleUploadUnit)
+		&limits.LimitType, &limits.DailyQuotaBytes, &limits.DailyQuotaUnit, &limits.WeeklyQuotaBytes, &limits.WeeklyQuotaUnit,
+		&limits.MonthlyQuotaBytes, &limits.MonthlyQuotaUnit)
 	if err == sql.ErrNoRows {
 		return hotspotLimits{}, false, nil
 	}
 	if err != nil {
 		return hotspotLimits{}, false, err
 	}
-	return normalizeLimitUnits(limits), true, nil
-}
-
-// getProfileCreditConfig projeta so a politica de credito do perfil
-// (nunca saldo/estado) no mesmo shape usado pelo formulario de credito
-// por dispositivo (hotspotCreditConfigRequest).
-func getProfileCreditConfig(db *sql.DB, id string) (hotspotCreditConfigRequest, bool, error) {
-	var cfg hotspotCreditConfigRequest
-	err := db.QueryRow(`
-		SELECT credit_enabled, credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes
-		FROM hotspot_profiles WHERE id = $1
-	`, id).Scan(&cfg.Enabled, &cfg.RechargeAmountBytes, &cfg.RechargePeriod, &cfg.PlafondBytes)
-	if err == sql.ErrNoRows {
-		return hotspotCreditConfigRequest{}, false, nil
-	}
-	if err != nil {
-		return hotspotCreditConfigRequest{}, false, err
-	}
-	return cfg, true, nil
+	return normalizeDeviceLimitUnits(limits), true, nil
 }
 
 type hotspotProfileRef struct {

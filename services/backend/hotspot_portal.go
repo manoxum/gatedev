@@ -25,15 +25,15 @@ import (
 var errPortalDeviceNotIdentified = errors.New("nao foi possivel identificar seu dispositivo - reconecte-se ao Wi-Fi e tente novamente")
 
 type hotspotPortalMeResponse struct {
-	MAC             string  `json:"mac"`
-	Alias           string  `json:"alias,omitempty"`
-	ProfileName     string  `json:"profileName,omitempty"`
-	Blocked         bool    `json:"blocked"`
-	BlockedByCredit bool    `json:"blockedByCredit"`
-	CreditEnabled   bool    `json:"creditEnabled"`
-	BalanceBytes    int64   `json:"balanceBytes"`
-	PlafondBytes    *int64  `json:"plafondBytes"`
-	hotspotTrafficResponse
+	MAC             string                             `json:"mac"`
+	Alias           string                             `json:"alias,omitempty"`
+	ProfileName     string                             `json:"profileName,omitempty"`
+	Blocked         bool                               `json:"blocked"`
+	LimitType       limitType                          `json:"limitType"`
+	BlockedByCredit bool                                `json:"blockedByCredit"`
+	BalanceBytes    int64                              `json:"balanceBytes"`
+	PlafondBytes    *int64                             `json:"plafondBytes"`
+	QuotaPeriods    []hotspotDeviceQuotaPeriodResponse `json:"quotaPeriods,omitempty"`
 }
 
 type hotspotPortalRedeemRequest struct {
@@ -78,7 +78,9 @@ func registerHotspotPortalRoutes(mux *http.ServeMux, db *sql.DB, worker *workerC
 		}
 		audit.record(r.Context(), "voucher_redeemed", mac, map[string]any{"code": req.Code})
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(creditResponse(credit))
+		// redeemVoucher ja forca o dispositivo para o tipo credito (ver
+		// hotspot_vouchers.go) - sem necessidade de reler effectiveDeviceLimits.
+		_ = json.NewEncoder(w).Encode(creditResponse(credit, limitTypeCredit))
 	})
 
 	mux.HandleFunc("GET /api/hotspot/portal/credit/history", func(w http.ResponseWriter, r *http.Request) {
@@ -102,10 +104,6 @@ func portalMeResponse(ctx context.Context, db *sql.DB, worker *workerClient, mac
 	if err != nil {
 		return hotspotPortalMeResponse{}, err
 	}
-	traffic, err := ensureDeviceTrafficRow(db, mac)
-	if err != nil {
-		return hotspotPortalMeResponse{}, err
-	}
 	limits, err := effectiveDeviceLimits(db, mac)
 	if err != nil {
 		return hotspotPortalMeResponse{}, err
@@ -126,16 +124,23 @@ func portalMeResponse(ctx context.Context, db *sql.DB, worker *workerClient, mac
 	if err != nil {
 		return hotspotPortalMeResponse{}, err
 	}
+	var quotaPeriods []hotspotDeviceQuotaPeriodResponse
+	if limits.LimitType == limitTypeQuota {
+		quotaPeriods, err = listDeviceQuotaPeriods(db, mac, limits)
+		if err != nil {
+			return hotspotPortalMeResponse{}, err
+		}
+	}
 
 	response := hotspotPortalMeResponse{
-		MAC:                    mac,
-		ProfileName:            profile.Name,
-		Blocked:                blocked[mac],
-		BlockedByCredit:        credit.BlockedByCredit,
-		CreditEnabled:          credit.Enabled,
-		BalanceBytes:           credit.BalanceBytes,
-		PlafondBytes:           credit.PlafondBytes,
-		hotspotTrafficResponse: deviceTrafficResponse(traffic, limits),
+		MAC:             mac,
+		ProfileName:     profile.Name,
+		Blocked:         blocked[mac],
+		LimitType:       limits.LimitType,
+		BlockedByCredit: credit.BlockedByCredit,
+		BalanceBytes:    credit.BalanceBytes,
+		PlafondBytes:    credit.PlafondBytes,
+		QuotaPeriods:    quotaPeriods,
 	}
 	if info.Alias.Valid {
 		response.Alias = info.Alias.String

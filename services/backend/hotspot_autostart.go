@@ -53,15 +53,29 @@ func autoStartHotspotOnBoot(db *sql.DB, worker *workerClient, audit *auditClient
 			lastErr = err
 			continue
 		}
-		if err := startHotspotRuntimeConfig(ctx, db, worker); err != nil {
+		if err := startHotspotAndReapply(ctx, db, worker, audit, iface, "sistema (autostart)"); err != nil {
 			lastErr = err
 			continue
 		}
-		reapplyHotspotBlocklist(ctx, db, worker, iface)
-		reapplyHotspotShaping(ctx, db, worker, iface)
-		audit.record(ctx, "hotspot_started", "sistema (autostart)", nil)
 		log.Println("[backend] hotspot religado automaticamente apos reinicio do backend")
 		return
 	}
 	log.Printf("[backend] autostart do hotspot desistiu apos varias tentativas: %v", lastErr)
+}
+
+// startHotspotAndReapply religa o servico do hotspot e reaplica
+// bloqueios/shaping por cima - mesma sequencia usada tanto aqui
+// (boot do backend) quanto pela recuperacao automatica em
+// reconcileHotspotOnce (hotspot_reconcile.go) quando o hotspot cai
+// sozinho (ex.: watchdog de falha de beacon em
+// services/worker/hotspot/watchdog.sh) com o admin ainda querendo ele
+// ligado.
+func startHotspotAndReapply(ctx context.Context, db *sql.DB, worker *workerClient, audit *auditClient, iface, username string) error {
+	if err := startHotspotRuntimeConfig(ctx, db, worker); err != nil {
+		return err
+	}
+	reapplyHotspotBlocklist(ctx, db, worker, iface)
+	reapplyHotspotShaping(ctx, db, worker, iface)
+	audit.record(ctx, "hotspot_started", username, nil)
+	return nil
 }

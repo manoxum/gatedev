@@ -9,7 +9,6 @@ export interface HotspotProfile extends HotspotLimits {
   id: string;
   name: string;
   isDefault: boolean;
-  creditEnabled: boolean;
   creditRechargeAmountBytes: number | null;
   creditRechargePeriod: QuotaPeriod | null;
   creditPlafondBytes: number | null;

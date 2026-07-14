@@ -3,8 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { HotspotRateQuotaFields } from "@/components/hotspot/HotspotRateQuotaFields";
-import { HotspotCreditConfigFields } from "@/components/hotspot/HotspotCreditConfigFields";
+import { HotspotLimitTypeFields } from "@/components/hotspot/HotspotLimitTypeFields";
 import {
   hotspotProfileFormSchema,
   profileToFormValues,
@@ -19,21 +18,22 @@ interface HotspotProfileFormProps {
   pending: boolean;
 }
 
-// Formulario de perfil - mesmo shape de campos de taxa/cota/throttle do
-// HotspotLimitsForm (via HotspotRateQuotaFields) + politica de credito
-// (via HotspotCreditConfigFields, mesma usada por DeviceCreditCard) +
-// nome. Um perfil combina os dois num so formulario/submit.
+// Formulario de perfil - mesmo shape de campos de taxa/tipo/cota do
+// limite de dispositivo (via HotspotLimitTypeFields, com a politica de
+// recarga de credito inline - perfil funde tudo num so formulario) +
+// nome.
 export function HotspotProfileForm({ value, onSubmit, pending }: HotspotProfileFormProps) {
   const {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors, isDirty },
   } = useForm<HotspotProfileFormValues>({
     resolver: zodResolver(hotspotProfileFormSchema),
     values: profileToFormValues(value),
   });
-  const enabled = watch("enabled");
+  const limitType = watch("limitType");
 
   return (
     <form className="space-y-6" onSubmit={handleSubmit((values) => onSubmit(formValuesToProfile(values)))}>
@@ -43,8 +43,13 @@ export function HotspotProfileForm({ value, onSubmit, pending }: HotspotProfileF
         {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
       </div>
 
-      <HotspotRateQuotaFields register={register} errors={errors} />
-      <HotspotCreditConfigFields register={register} enabled={enabled} />
+      <HotspotLimitTypeFields
+        register={register}
+        errors={errors}
+        limitType={limitType}
+        onLimitTypeChange={(type) => setValue("limitType", type, { shouldDirty: true, shouldValidate: true })}
+        includeCustom
+      />
 
       <Button type="submit" disabled={!isDirty || pending}>
         Salvar

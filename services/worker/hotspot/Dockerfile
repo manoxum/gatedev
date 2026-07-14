@@ -23,17 +23,24 @@ RUN apk add --no-cache \
 
 # hostapd: fixado em 2.10-r6 (repo da Alpine 3.20, ultima versao antes
 # do pulo pra 2.11 na Alpine 3.21) em vez do "hostapd" solto do repo da
-# imagem base (Alpine 3.22 = hostapd 2.11). A 2.11 trouxe o codigo
-# inicial de IEEE 802.11be/MLO (Wi-Fi 7) e, com ele, uma regressao
-# conhecida (relatada tambem por outros usuarios de create_ap/hostapd
-# fora deste repo) onde qualquer STA associando/reassociando apos o AP
-# ja estar de pe dispara "Failed to set beacon parameters" seguido de
-# "nl80211: kernel reports: key not allowed" e depois
-# "MLD: Failed to get link BSS for EVENT_ASSOC" em loop - o adaptador
-# fica derrubando/recusando clientes novos indefinidamente ate o
-# container ser reiniciado. A 2.10 nao tem esse codigo de MLO e nao
-# reproduz o problema. libnl3 (dependencia do hostapd) continua vindo
-# do repo normal da imagem base.
+# imagem base (Alpine 3.22 = hostapd 2.11), por causa de uma regressao
+# conhecida do codigo inicial de IEEE 802.11be/MLO (Wi-Fi 7) da 2.11
+# (relatada tambem por outros usuarios de create_ap/hostapd fora deste
+# repo). ATENCAO: essa mesma assinatura de log ("Failed to set beacon
+# parameters" + "nl80211: kernel reports: key not allowed" + interface
+# disabled/enabled em loop, ver watchdog.sh) tambem reproduz com o
+# hostapd 2.10 pinado aqui - ja confirmado cruzando o log do container
+# com "iwlwifi ...: RF_KILL bit toggled" no kernel e o audit
+# "radio-control" do NetworkManager no mesmo timestamp: o gatilho real
+# observado foi um rfkill de verdade na placa fisica em uso pelo
+# hotspot (--no-virt), porque o NetworkManager continuava "dono" dela -
+# ver unmanagePhysicalInterfaceIfIdle em
+# services/backend/hotspot_network.go.
+# O pin da 2.10 continua valendo a pena (evita a regressao de MLO em
+# si), mas nao assuma que ele sozinho elimina essa cascata de beacon -
+# watchdog.sh continua sendo a rede de seguranca de qualquer forma.
+# libnl3 (dependencia do hostapd) continua vindo do repo normal da
+# imagem base.
 RUN apk add --no-cache hostapd=2.10-r6 \
     --repository=https://dl-cdn.alpinelinux.org/alpine/v3.20/main
 
@@ -45,8 +52,8 @@ RUN curl -fsSL https://raw.githubusercontent.com/oblique/create_ap/master/create
 	    && rm /tmp/patch-create-ap.sh \
 	    && chmod +x /usr/local/bin/create_ap
 
-COPY entrypoint.sh channel.sh interfaces.sh regulatory.sh /usr/local/bin/
+COPY entrypoint.sh channel.sh interfaces.sh regulatory.sh watchdog.sh /usr/local/bin/
 RUN mv /usr/local/bin/entrypoint.sh /usr/local/bin/hotspot-entrypoint.sh \
-    && chmod +x /usr/local/bin/hotspot-entrypoint.sh /usr/local/bin/channel.sh /usr/local/bin/interfaces.sh /usr/local/bin/regulatory.sh
+    && chmod +x /usr/local/bin/hotspot-entrypoint.sh /usr/local/bin/channel.sh /usr/local/bin/interfaces.sh /usr/local/bin/regulatory.sh /usr/local/bin/watchdog.sh
 
 ENTRYPOINT ["/usr/local/bin/hotspot-entrypoint.sh"]

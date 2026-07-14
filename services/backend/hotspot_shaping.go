@@ -50,22 +50,20 @@ type rateLimit struct {
 	Unit  rateUnit `json:"unit"`
 }
 
-// effectiveDeviceRates decide a taxa que deve valer agora: a
-// configurada, ou a de throttle se a cota do periodo ja estourou, ou
-// Value nil (sem classe HTB dedicada, so contagem) se nao houver
-// nenhuma.
-func effectiveDeviceRates(limits hotspotLimits, traffic hotspotDeviceTraffic) (download, upload rateLimit) {
-	if traffic.Throttled {
-		if limits.QuotaThrottleDownloadValue != nil || limits.QuotaThrottleUploadValue != nil {
-			return rateLimit{limits.QuotaThrottleDownloadValue, limits.QuotaThrottleDownloadUnit},
-				rateLimit{limits.QuotaThrottleUploadValue, limits.QuotaThrottleUploadUnit}
-		}
-	}
+// effectiveDeviceRates decide a taxa que deve valer agora para um
+// dispositivo: sempre a taxa configurada (download/upload), Value nil
+// (sem classe HTB dedicada, so contagem) se nao houver nenhuma. Taxa e
+// independente do LimitType (requisito confirmado com o admin) - ao
+// contrario do limite global, cota de dispositivo/perfil nunca throttla
+// mais: estourar um periodo configurado e bloqueio rigido (ver
+// reconcileDeviceQuota em hotspot_device_quota_store.go), nao reducao
+// de taxa.
+func effectiveDeviceRates(limits hotspotLimits) (download, upload rateLimit) {
 	return rateLimit{limits.DownloadRateValue, limits.DownloadRateUnit},
 		rateLimit{limits.UploadRateValue, limits.UploadRateUnit}
 }
 
-func effectiveGlobalRates(limits hotspotLimits, traffic hotspotGlobalTraffic) (download, upload rateLimit) {
+func effectiveGlobalRates(limits hotspotGlobalLimits, traffic hotspotGlobalTraffic) (download, upload rateLimit) {
 	if traffic.Throttled {
 		if limits.QuotaThrottleDownloadValue != nil || limits.QuotaThrottleUploadValue != nil {
 			return rateLimit{limits.QuotaThrottleDownloadValue, limits.QuotaThrottleDownloadUnit},
@@ -145,11 +143,7 @@ func ensureDeviceShaping(ctx context.Context, db *sql.DB, worker *workerClient, 
 	if err != nil {
 		return err
 	}
-	traffic, err := ensureDeviceTrafficRow(db, mac)
-	if err != nil {
-		return err
-	}
-	download, upload := effectiveDeviceRates(limits, traffic)
+	download, upload := effectiveDeviceRates(limits)
 	return worker.call(ctx, http.MethodPost, "/hotspot/shaping/device", shapingDevicePayload{
 		Interface:         iface,
 		MAC:               mac,

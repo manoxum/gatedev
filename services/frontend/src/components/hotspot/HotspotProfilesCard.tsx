@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { bytesToGB } from "@/components/hotspot/hotspot-limits-types";
+import { bytesToGB, formatQuotaValue, LIMIT_TYPE_LABELS } from "@/components/hotspot/hotspot-limits-types";
 import { HotspotProfileForm } from "@/components/hotspot/HotspotProfileForm";
 import { useHotspotProfiles } from "@/components/hotspot/useHotspotProfileQueries";
 import { useHotspotProfileMutations } from "@/components/hotspot/useHotspotProfileMutations";
@@ -20,13 +20,13 @@ const emptyProfile: HotspotProfile = {
   downloadRateUnit: "mbit",
   uploadRateValue: null,
   uploadRateUnit: "mbit",
-  quotaBytes: null,
-  quotaPeriod: null,
-  quotaThrottleDownloadValue: null,
-  quotaThrottleDownloadUnit: "mbit",
-  quotaThrottleUploadValue: null,
-  quotaThrottleUploadUnit: "mbit",
-  creditEnabled: false,
+  limitType: "unlimited",
+  dailyQuotaBytes: null,
+  dailyQuotaUnit: "gbyte",
+  weeklyQuotaBytes: null,
+  weeklyQuotaUnit: "gbyte",
+  monthlyQuotaBytes: null,
+  monthlyQuotaUnit: "gbyte",
   creditRechargeAmountBytes: null,
   creditRechargePeriod: null,
   creditPlafondBytes: null,
@@ -37,16 +37,24 @@ function rateSummary(profile: HotspotProfile) {
   return `${profile.downloadRateValue ?? "-"} / ${profile.uploadRateValue ?? "-"} ${profile.downloadRateUnit}`;
 }
 
-function quotaSummary(profile: HotspotProfile) {
-  if (!profile.quotaBytes) return "sem cota";
-  return `${bytesToGB(profile.quotaBytes).toFixed(0)}GB / ${profile.quotaPeriod}`;
-}
-
-function creditSummary(profile: HotspotProfile) {
-  if (!profile.creditEnabled) return "não exige crédito";
-  return profile.creditRechargeAmountBytes
-    ? `recarga ${bytesToGB(profile.creditRechargeAmountBytes).toFixed(0)}GB/${profile.creditRechargePeriod}`
-    : "só recarga manual";
+function typeDetailSummary(profile: HotspotProfile) {
+  if (profile.limitType === "credit") {
+    return profile.creditRechargeAmountBytes
+      ? `recarga ${bytesToGB(profile.creditRechargeAmountBytes).toFixed(0)}GB/${profile.creditRechargePeriod}`
+      : "só recarga manual";
+  }
+  if (profile.limitType === "quota") {
+    const periods: [number | null, string, typeof profile.dailyQuotaUnit][] = [
+      [profile.dailyQuotaBytes, "diária", profile.dailyQuotaUnit],
+      [profile.weeklyQuotaBytes, "semanal", profile.weeklyQuotaUnit],
+      [profile.monthlyQuotaBytes, "mensal", profile.monthlyQuotaUnit],
+    ];
+    const configured = periods.filter(([bytes]) => bytes !== null) as [number, string, typeof profile.dailyQuotaUnit][];
+    if (configured.length === 0) return "sem teto definido";
+    return configured.map(([bytes, label, unit]) => `${formatQuotaValue(bytes, unit)}/${label}`).join(", ");
+  }
+  if (profile.limitType === "custom") return "dispositivo define";
+  return "—";
 }
 
 export function HotspotProfilesCard() {
@@ -78,8 +86,8 @@ export function HotspotProfilesCard() {
             <TableRow>
               <TableHead>Nome</TableHead>
               <TableHead>Taxa</TableHead>
-              <TableHead>Cota</TableHead>
-              <TableHead>Crédito</TableHead>
+              <TableHead>Tipo</TableHead>
+              <TableHead>Detalhe</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
@@ -93,8 +101,8 @@ export function HotspotProfilesCard() {
                   </div>
                 </TableCell>
                 <TableCell className="text-sm">{rateSummary(profile)}</TableCell>
-                <TableCell className="text-sm">{quotaSummary(profile)}</TableCell>
-                <TableCell className="text-sm">{creditSummary(profile)}</TableCell>
+                <TableCell className="text-sm">{LIMIT_TYPE_LABELS[profile.limitType]}</TableCell>
+                <TableCell className="text-sm">{typeDetailSummary(profile)}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setEditing(profile)}>

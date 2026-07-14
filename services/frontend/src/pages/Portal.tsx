@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { HotspotQuotaProgress } from "@/components/hotspot/HotspotQuotaProgress";
+import { HotspotQuotaPeriodBars } from "@/components/hotspot/HotspotQuotaPeriodBars";
 import { bytesToGB } from "@/components/hotspot/hotspot-limits-types";
 import { usePortalMe } from "@/components/portal/usePortalQueries";
 import { useRedeemVoucher } from "@/components/portal/usePortalMutations";
@@ -57,13 +57,15 @@ export function PortalPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">{me.data.alias || me.data.mac}</p>
                   <p className="text-xl font-semibold">
-                    {me.data.creditEnabled ? `${bytesToGB(me.data.balanceBytes).toFixed(2)}GB de saldo` : "Sem cobrança de crédito"}
+                    {me.data.limitType === "credit"
+                      ? `${bytesToGB(me.data.balanceBytes).toFixed(2)}GB de saldo`
+                      : "Sem cobrança de crédito"}
                   </p>
                 </div>
                 {me.data.blockedByCredit && <Badge variant="destructive">sem saldo</Badge>}
               </div>
 
-              <HotspotQuotaProgress traffic={me.data} />
+              {me.data.limitType === "quota" && <HotspotQuotaPeriodBars periods={me.data.quotaPeriods ?? []} />}
 
               <div className="space-y-2">
                 <Label htmlFor="voucherCode">Código do cartão de recarga</Label>

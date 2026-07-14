@@ -262,11 +262,13 @@ WIFI_FREQ_BAND="${WIFI_FREQ_BAND:-auto}"
 
 # channel.sh: selecao de banda/canal Wi-Fi. interfaces.sh: resolucao/
 # avisos sobre a interface de internet. regulatory.sh: diagnostico do
-# dominio regulatorio Wi-Fi. Todos sourced do mesmo diretorio deste
-# script (ver Dockerfile - os quatro arquivos vao para /usr/local/bin/).
+# dominio regulatorio Wi-Fi. watchdog.sh: deteccao em tempo real de
+# falha de beacon do create_ap. Todos sourced do mesmo diretorio deste
+# script (ver Dockerfile - os cinco arquivos vao para /usr/local/bin/).
 source "$(dirname "$0")/channel.sh"
 source "$(dirname "$0")/interfaces.sh"
 source "$(dirname "$0")/regulatory.sh"
+source "$(dirname "$0")/watchdog.sh"
 
 # So informativo - roda uma vez no inicio pra deixar visivel no log
 # qualquer trava regulatoria de firmware (phy self-managed) antes de
@@ -361,6 +363,7 @@ try_create_ap() {
   local band="$1"
   local channel="$2"
   local status=0
+  local country="${WIFI_COUNTRY}"
   local -a virtual_interface_args=()
 
   # Algumas falhas de create_ap executam limpeza propria antes de
@@ -377,21 +380,53 @@ try_create_ap() {
   # operacao sem perder funcionalidade; o uplink continua sendo bn-uplink.
   if iw dev "${WIFI_INTERFACE}" link 2>/dev/null | grep -q '^Connected to '; then
     log "Wi-Fi cliente ativo em ${WIFI_INTERFACE}; preservando-o com uma interface AP virtual."
+    # Um unico radio so transmite numa frequencia por vez: se
+    # WIFI_INTERFACE (AP) e INTERNET_INTERFACE (STA) sao a mesma placa,
+    # o AP fisicamente so pode subir no mesmo canal/banda que a
+    # associacao Wi-Fi cliente ja esta usando agora - sobrescreve
+    # band/channel desta tentativa (que podem vir de WIFI_CHANNEL fixo,
+    # de rank_channels_for_band ou do ultimo canal bom) por esse
+    # motivo, e nao por preferencia do usuario.
+    local sta_band_channel
+    if sta_band_channel="$(sta_current_band_channel)"; then
+      local sta_band="${sta_band_channel% *}"
+      local sta_channel="${sta_band_channel#* }"
+      if [[ "${sta_band}" != "${band}" || "${sta_channel}" != "${channel}" ]]; then
+        log "AVISO: ${WIFI_INTERFACE} esta associado em ${sta_band}GHz canal ${sta_channel} agora; um unico radio nao pode manter o AP em ${band}GHz canal ${channel} ao mesmo tempo - travando o hotspot no canal da estacao."
+        band="${sta_band}"
+        channel="${sta_channel}"
+      fi
+    else
+      log "AVISO: nao foi possivel ler o canal atual da associacao Wi-Fi cliente de ${WIFI_INTERFACE}; seguindo com banda ${band}GHz/canal ${channel} sem travar no canal da estacao."
+    fi
+    # O canal acima ja e, por definicao, um canal que o firmware aceitou
+    # transmitir para a associacao STA em curso - inclusive quando o phy
+    # e self-managed e ignora WIFI_COUNTRY (ver regulatory.sh). Repassar
+    # WIFI_COUNTRY pro hostapd nesse caso so arrisca a tabela de
+    # canais/potencia propria do hostapd (independente do firmware)
+    # rejeitar um canal que na pratica ja funciona - usa o pais que o
+    # firmware self-managed realmente aplica, quando existir.
+    local self_managed_country
+    self_managed_country="$(self_managed_regulatory_country)"
+    if [[ -n "${self_managed_country}" && "${self_managed_country}" != "${country}" ]]; then
+      log "AVISO: usando pais regulatorio '${self_managed_country}' (imposto pelo firmware self-managed) no hostapd em vez de WIFI_COUNTRY='${WIFI_COUNTRY}', para nao rejeitar o canal ${channel} que a associacao Wi-Fi cliente ja usa de fato."
+      country="${self_managed_country}"
+    fi
   else
     virtual_interface_args=(--no-virt)
     log "${WIFI_INTERFACE} sem associacao Wi-Fi cliente; usando a interface fisica diretamente em modo AP (--no-virt)."
   fi
 
   log "Preparando hotspot '${WIFI_SSID}' em ${WIFI_INTERFACE}, internet via ${CREATE_AP_INTERNET_INTERFACE} (alimentado por ${REAL_INTERNET_INTERFACE})."
-  log "Regiao Wi-Fi: ${WIFI_COUNTRY}; banda: ${band}GHz; canal: ${channel}."
+  log "Regiao Wi-Fi: ${country}; banda: ${band}GHz; canal: ${channel}."
   log "Gateway do hotspot: ${HOTSPOT_GATEWAY}; DNS entregues por DHCP: ${DHCP_DNS_SERVERS}."
   log "Dominios de busca entregues por DHCP: ${DHCP_SEARCH_DOMAINS}."
 
   # Roda em segundo plano e usa "wait $PID" (em vez de um pipe em
   # primeiro plano) de proposito: o bash so garante que um trap (ver
-  # "trap cleanup EXIT INT TERM" mais abaixo) interrompe e roda durante
-  # um "wait" explicito - bloqueado dentro de um pipe em primeiro
-  # plano, o SIGTERM do "docker compose stop"/painel fica pendente ate
+  # "trap cleanup EXIT" / "trap ... INT TERM" mais abaixo) interrompe e
+  # roda durante um "wait" explicito - bloqueado dentro de um pipe em
+  # primeiro plano, o SIGTERM do "docker compose stop"/painel fica pendente ate
   # o create_ap terminar sozinho (nunca termina, ele serve o hotspot
   # indefinidamente), e o Docker acaba forcando SIGKILL apos o prazo,
   # sem o cleanup rodar - deixando a interface virtual orfa (ver
@@ -400,7 +435,7 @@ try_create_ap() {
     "${virtual_interface_args[@]}" \
     --no-dns \
     --dhcp-dns "${DHCP_DNS_SERVERS}" \
-    --country "${WIFI_COUNTRY}" \
+    --country "${country}" \
     --freq-band "${band}" \
     -c "${channel}" \
     -g "${HOTSPOT_GATEWAY}" \
@@ -409,8 +444,19 @@ try_create_ap() {
     "${WIFI_SSID}" \
     "${WIFI_PASSWORD}" > >(tee "${CREATE_AP_LOG}") 2>&1 &
   CREATE_AP_PID=$!
+  start_beacon_failure_watcher "${CREATE_AP_LOG}" "${CREATE_AP_PID}"
   wait "${CREATE_AP_PID}" || status=$?
+  stop_beacon_failure_watcher
   CREATE_AP_PID=
+
+  # LAST_GOOD_BAND/LAST_GOOD_CHANNEL (globais, declaradas mais abaixo)
+  # guardam o ultimo canal que realmente conseguiu subir o AP nesta
+  # execucao - o loop de retry no fim do script tenta esse canal
+  # direto antes de repetir a varredura completa.
+  if [[ "${status}" -eq 0 ]]; then
+    LAST_GOOD_BAND="${band}"
+    LAST_GOOD_CHANNEL="${channel}"
+  fi
 
   if [[ "${status}" -ne 0 ]] && grep -qi 'can not be a station.*and an AP at the same time' "${CREATE_AP_LOG}"; then
     log "ERRO: ${WIFI_INTERFACE} ainda esta associado como estacao (cliente Wi-Fi) - o driver desta placa nao suporta AP+estacao simultaneos, e trocar de canal/banda nao muda isso. Use outra placa para o hotspot ou outra interface Wi-Fi compatível com AP+STA."
@@ -468,17 +514,27 @@ if ! grep -q -- '--dhcp-dns' <<< "${CREATE_AP_HELP}"; then
   exit 1
 fi
 
-# Guarda a escolha original do usuario antes de resolve_wifi_band
-# sobrescrever WIFI_FREQ_BAND - so tenta a banda alternativa (fallback)
-# quando o proprio usuario deixou banda E canal em "auto" (modo
-# totalmente automatico); um canal ou banda fixados explicitamente sao
-# respeitados como estao, sem fallback.
 CREATE_AP_PID=
 UPLINK_MONITOR_PID=""
+STOPPING=0
+
+# LAST_GOOD_BAND/LAST_GOOD_CHANNEL: ver comentario em try_create_ap.
+LAST_GOOD_BAND=""
+LAST_GOOD_CHANNEL=""
 
 cleanup() {
   log "Encerrando hotspot em ${WIFI_INTERFACE}."
-  create_ap --stop "${WIFI_INTERFACE}" >/dev/null 2>&1 || true
+  stop_beacon_failure_watcher
+  # timeout -k: "create_ap --stop" roda uma instancia nova do proprio
+  # script create_ap so pra localizar e sinalizar a instancia ativa. Se
+  # a instancia original estiver presa num loop de erro do driver
+  # (ex.: a regressao de beacon do hostapd, ver watchdog.sh), essa
+  # segunda instancia pode nao encontrar um estado consistente e
+  # travar - sem limite de tempo aqui, o cleanup inteiro (e portanto a
+  # saida do script e a deteccao da queda pelo backend) ficaria preso
+  # indefinidamente. "-k 5" forca SIGKILL 5s depois do SIGTERM inicial
+  # se ainda nao tiver saido.
+  timeout -k 5 10 create_ap --stop "${WIFI_INTERFACE}" >/dev/null 2>&1 || true
   # Reforco: "create_ap --stop" ja resolve e sinaliza o PID certo
   # sozinho, mas se por algum motivo ele nao encontrar a instancia,
   # sinaliza direto o PID que guardamos - create_ap trata SIGINT como
@@ -486,8 +542,19 @@ cleanup() {
   [[ -n "${CREATE_AP_PID}" ]] && kill -INT "${CREATE_AP_PID}" >/dev/null 2>&1 || true
   cleanup_bindnet_uplink
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+# STOPPING=1 aqui (alem de cleanup) e o que diferencia, no loop de
+# retry mais abaixo, uma parada pedida de verdade (stop_service manda
+# SIGTERM para o PID deste script) de uma queda que deve ser
+# retentada no lugar (watchdog.sh mata so o CREATE_AP_PID diretamente,
+# nunca este processo - STOPPING continua 0 nesse caso).
+trap 'STOPPING=1; cleanup' INT TERM
 
+# Guarda a escolha original do usuario antes de resolve_wifi_band
+# sobrescrever WIFI_FREQ_BAND - so tenta a banda alternativa (fallback)
+# quando o proprio usuario deixou banda E canal em "auto" (modo
+# totalmente automatico); um canal ou banda fixados explicitamente sao
+# respeitados como estao, sem fallback.
 ORIGINAL_WIFI_FREQ_BAND="${WIFI_FREQ_BAND}"
 resolve_wifi_band
 
@@ -515,31 +582,99 @@ remove_stale_virtual_interfaces
 setup_bindnet_virtual_uplink
 start_uplink_monitor
 
-if [[ "${WIFI_CHANNEL}" != "auto" ]]; then
-  if ! [[ "${WIFI_CHANNEL}" =~ ^[0-9]+$ ]]; then
-    log "ERRO: WIFI_CHANNEL deve ser numerico ou auto."
+# attempt_hotspot_cycle faz uma rodada completa de tentativa de subir
+# o hotspot: primeiro tenta direto o ultimo canal/banda que funcionou
+# nesta mesma execucao (LAST_GOOD_BAND/LAST_GOOD_CHANNEL - evita
+# repetir toda a varredura, incluindo bandas/canais ja sabidamente
+# ruins nesta placa, ex.: trava regulatoria de firmware que rejeita
+# 5GHz inteiro); se isso falhar ou for a primeira tentativa, cai para
+# o fluxo normal (canal fixo do usuario, ou varredura automatica com
+# fallback de banda, tambem comecando pela banda ja conhecida como boa
+# quando existir). Mesmo contrato de retorno de
+# try_create_ap/start_hotspot_auto (0 sucesso/parada limpa, 1 falha
+# retentavel, 2 falha definitiva).
+attempt_hotspot_cycle() {
+  local status=0
+
+  if [[ -n "${LAST_GOOD_BAND}" && -n "${LAST_GOOD_CHANNEL}" ]]; then
+    log "Tentando primeiro o canal ${LAST_GOOD_CHANNEL} (${LAST_GOOD_BAND}GHz), que funcionou da ultima vez nesta execucao."
+    try_create_ap "${LAST_GOOD_BAND}" "${LAST_GOOD_CHANNEL}" || status=$?
+    if [[ "${status}" -eq 0 || "${status}" -eq 2 ]]; then
+      return "${status}"
+    fi
+    log "AVISO: canal ${LAST_GOOD_CHANNEL} (${LAST_GOOD_BAND}GHz) nao funcionou desta vez; voltando a varredura completa."
+  fi
+
+  if [[ "${WIFI_CHANNEL}" != "auto" ]]; then
+    if ! [[ "${WIFI_CHANNEL}" =~ ^[0-9]+$ ]]; then
+      log "ERRO: WIFI_CHANNEL deve ser numerico ou auto."
+      return 1
+    fi
+    status=0
+    try_create_ap "${WIFI_FREQ_BAND}" "${WIFI_CHANNEL}" || status=$?
+    return "${status}"
+  fi
+
+  local first_band="${LAST_GOOD_BAND:-${WIFI_FREQ_BAND}}"
+  status=0
+  start_hotspot_auto "${first_band}" || status=$?
+  if [[ "${status}" -eq 0 || "${status}" -eq 2 ]]; then
+    return "${status}"
+  fi
+
+  if [[ "${ORIGINAL_WIFI_FREQ_BAND}" == "auto" ]]; then
+    local fallback_band="2.4"
+    [[ "${first_band}" == "2.4" ]] && fallback_band="5"
+    log "AVISO: nenhum canal funcionou em ${first_band}GHz; tentando banda alternativa ${fallback_band}GHz."
+    status=0
+    start_hotspot_auto "${fallback_band}" || status=$?
+  fi
+  return "${status}"
+}
+
+# Loop de retry: qualquer queda do create_ap que nao seja uma parada
+# pedida de verdade (STOPPING=1, ver trap acima) e retentada no lugar,
+# com backoff crescente, ate HOTSPOT_MAX_RESTART_ATTEMPTS. So depois
+# de esgotar essas tentativas locais o script sai de fato (STATUS=1),
+# deixando a reconciliacao do backend religar via novo "start" (ver
+# recoverHotspotIfDesired em services/backend/hotspot_reconcile.go) -
+# rede de seguranca para quando o problema nao e mais o create_ap
+# sozinho (ex.: o proprio container/host caiu). status 2 (falha
+# definitiva, ver contrato de try_create_ap) sempre sai na hora, sem
+# retentar - trocar de canal/banda ou tentar de novo nunca resolve
+# esses casos.
+HOTSPOT_MAX_RESTART_ATTEMPTS="${HOTSPOT_MAX_RESTART_ATTEMPTS:-5}"
+HOTSPOT_RESTART_BACKOFF_SECONDS="${HOTSPOT_RESTART_BACKOFF_SECONDS:-3}"
+
+attempt=0
+while true; do
+  # Confere STOPPING logo no topo tambem: se um SIGTERM/SIGINT chegou
+  # durante o "sleep" do backoff abaixo, ele interrompe o sleep e volta
+  # pro topo do loop - sem essa checagem aqui, uma parada pedida bem
+  # nessa janela ainda dispararia mais uma tentativa completa de subir
+  # o hotspot antes de sair.
+  if [[ "${STOPPING}" -eq 1 ]]; then
+    exit 0
+  fi
+
+  attempt=$((attempt + 1))
+  STATUS=0
+  attempt_hotspot_cycle || STATUS=$?
+
+  if [[ "${STATUS}" -eq 2 ]]; then
     exit 1
   fi
-  STATUS=0
-  try_create_ap "${WIFI_FREQ_BAND}" "${WIFI_CHANNEL}" || STATUS=$?
-  [[ "${STATUS}" -eq 2 ]] && exit 1
-  exit "${STATUS}"
-fi
 
-STATUS=0
-start_hotspot_auto "${WIFI_FREQ_BAND}" || STATUS=$?
-[[ "${STATUS}" -eq 0 ]] && exit 0
-[[ "${STATUS}" -eq 2 ]] && exit 1
+  if [[ "${STOPPING}" -eq 1 ]]; then
+    exit "${STATUS}"
+  fi
 
-if [[ "${ORIGINAL_WIFI_FREQ_BAND}" == "auto" ]]; then
-  FALLBACK_BAND="2.4"
-  [[ "${WIFI_FREQ_BAND}" == "2.4" ]] && FALLBACK_BAND="5"
-  log "AVISO: nenhum canal funcionou em ${WIFI_FREQ_BAND}GHz; tentando banda alternativa ${FALLBACK_BAND}GHz."
-  STATUS=0
-  start_hotspot_auto "${FALLBACK_BAND}" || STATUS=$?
-  [[ "${STATUS}" -eq 0 ]] && exit 0
-  [[ "${STATUS}" -eq 2 ]] && exit 1
-fi
+  if [[ "${attempt}" -ge "${HOTSPOT_MAX_RESTART_ATTEMPTS}" ]]; then
+    log "ERRO: hotspot caiu/falhou ${attempt} vezes seguidas nesta execucao; desistindo e deixando a reconciliacao do backend religar (em ate 15s)."
+    exit 1
+  fi
 
-log "ERRO: nao foi possivel iniciar o hotspot em nenhum canal/banda testado."
-exit 1
+  backoff=$((HOTSPOT_RESTART_BACKOFF_SECONDS * attempt))
+  log "Hotspot caiu (tentativa ${attempt}/${HOTSPOT_MAX_RESTART_ATTEMPTS}); tentando de novo em ${backoff}s."
+  sleep "${backoff}"
+done

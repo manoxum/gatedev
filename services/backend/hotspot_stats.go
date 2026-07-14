@@ -60,6 +60,32 @@ func registerHotspotStatsRoutes(mux *http.ServeMux, admin *administrator, db *sq
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(entries)
 	}))
+
+	mux.HandleFunc("GET /api/hotspot/stats/global", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		response, err := globalLiveStats(r.Context(), worker)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+}
+
+// globalLiveStats devolve a taxa agregada de todo o hotspot (nao um
+// dispositivo) desde a ultima leitura - mesmo cache em memoria
+// (computeLiveRate) que trackedDeviceRate usa por MAC, so que sob a
+// chave sentinela globalSpeedHistoryKey. Ao contrario de
+// trackedDeviceRate, nao chama ensureDeviceShaping: a contagem global
+// (mangle "bn-global-*") ja fica de pe via applyGlobalShaping desde que
+// o hotspot sobe (reapplyHotspotShaping), sem depender de nenhum
+// dispositivo especifico estar conectado.
+func globalLiveStats(ctx context.Context, worker *workerClient) (hotspotDeviceStatsResponse, error) {
+	download, upload, err := readDeviceShapingStats(ctx, worker, "")
+	if err != nil {
+		return hotspotDeviceStatsResponse{}, err
+	}
+	return computeLiveRate(globalSpeedHistoryKey, download, upload), nil
 }
 
 // deviceLiveStats garante a regra de contagem do dispositivo (se ele

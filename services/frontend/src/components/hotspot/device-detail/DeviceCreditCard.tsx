@@ -16,7 +16,8 @@ import {
 } from "@/components/hotspot/hotspot-limits-types";
 import { RateUnitOptions } from "@/components/hotspot/RateUnitOptions";
 import { HotspotCreditConfigFields } from "@/components/hotspot/HotspotCreditConfigFields";
-import { useDeviceCredit } from "@/components/hotspot/useHotspotQueries";
+import { EmptyState } from "@/components/bindnets/EmptyState";
+import { useDeviceCredit, useDeviceLimits } from "@/components/hotspot/useHotspotQueries";
 import { useDeviceCreditMutations, type DeviceCreditConfig } from "@/components/hotspot/useHotspotCreditMutations";
 
 const optionalPositiveInt = z
@@ -25,40 +26,48 @@ const optionalPositiveInt = z
   .refine((value) => value === "" || (/^\d+$/.test(value) && Number(value) > 0), "Deve ser um número positivo");
 
 const creditConfigSchema = z.object({
-  enabled: z.boolean(),
   rechargeAmountGB: optionalPositiveInt,
   rechargePeriod: z.enum(["daily", "weekly", "monthly"]),
   plafondGB: optionalPositiveInt,
 });
 type CreditConfigForm = z.infer<typeof creditConfigSchema>;
 
+// So mostra saldo/recarga/politica quando o tipo de limitação efetivo
+// do dispositivo é "crédito" (ver hotspot-limits-types.ts) - fora
+// disso, o saldo existe no banco (pode ter sobrado de uma configuração
+// anterior) mas não é debitado nem confere no bloqueio, então exibi-lo
+// aqui só confundiria o admin.
 export function DeviceCreditCard({ mac }: { mac: string }) {
   const [rechargeOpen, setRechargeOpen] = useState(false);
   const [rechargeValue, setRechargeValue] = useState("");
   const [rechargeUnit, setRechargeUnit] = useState<RateUnit>("gbyte");
+  const limits = useDeviceLimits(mac);
   const credit = useDeviceCredit(mac);
   const { saveConfig, recharge } = useDeviceCreditMutations(mac);
 
-  const { register, handleSubmit, watch } = useForm<CreditConfigForm>({
+  const { register, handleSubmit } = useForm<CreditConfigForm>({
     resolver: zodResolver(creditConfigSchema),
     values: credit.data
       ? {
-          enabled: credit.data.enabled,
           rechargeAmountGB: credit.data.rechargeAmountBytes ? String(Math.round(bytesToGB(credit.data.rechargeAmountBytes))) : "",
           rechargePeriod: credit.data.rechargePeriod ?? "daily",
           plafondGB: credit.data.plafondBytes ? String(Math.round(bytesToGB(credit.data.plafondBytes))) : "",
         }
       : undefined,
   });
-  const enabled = watch("enabled");
 
-  if (!credit.data) {
+  if (!credit.data || !limits.data) {
     return <div className="h-48 animate-pulse rounded-lg border bg-muted/30" />;
+  }
+
+  if (limits.data.limitType !== "credit") {
+    return (
+      <EmptyState label={`Este dispositivo não usa crédito (tipo atual: ${limits.data.limitType === "quota" ? "Cota" : "Ilimitado"}). Mude para "Crédito" na aba Limites para usar saldo/recarga.`} />
+    );
   }
 
   function onSubmitConfig(values: CreditConfigForm) {
     const config: DeviceCreditConfig = {
-      enabled: values.enabled,
       rechargeAmountBytes: values.rechargeAmountGB ? Number(values.rechargeAmountGB) * GIGABYTE : null,
       rechargePeriod: values.rechargeAmountGB ? values.rechargePeriod : null,
       plafondBytes: values.plafondGB ? Number(values.plafondGB) * GIGABYTE : null,
@@ -88,7 +97,7 @@ export function DeviceCreditCard({ mac }: { mac: string }) {
       </div>
 
       <form className="space-y-4" onSubmit={handleSubmit(onSubmitConfig)}>
-        <HotspotCreditConfigFields register={register} enabled={enabled} />
+        <HotspotCreditConfigFields register={register} />
 
         <Button type="submit" disabled={saveConfig.isPending}>
           Salvar

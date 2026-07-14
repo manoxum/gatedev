@@ -134,17 +134,16 @@ func upsertDeviceCreditConfig(db *sql.DB, mac string, req hotspotCreditConfigReq
 	nextRechargeAt := computeNextRechargeAt(existingPeriod, existingNext, req.RechargePeriod)
 
 	_, err = db.Exec(`
-		INSERT INTO hotspot_device_credit (mac_address, enabled, recharge_amount_bytes, recharge_period, plafond_bytes, next_recharge_at, configured, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, true, CURRENT_TIMESTAMP)
+		INSERT INTO hotspot_device_credit (mac_address, recharge_amount_bytes, recharge_period, plafond_bytes, next_recharge_at, configured, updated_at)
+		VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP)
 		ON CONFLICT (mac_address) DO UPDATE
-		SET enabled = EXCLUDED.enabled,
-		    recharge_amount_bytes = EXCLUDED.recharge_amount_bytes,
+		SET recharge_amount_bytes = EXCLUDED.recharge_amount_bytes,
 		    recharge_period = EXCLUDED.recharge_period,
 		    plafond_bytes = EXCLUDED.plafond_bytes,
 		    next_recharge_at = EXCLUDED.next_recharge_at,
 		    configured = true,
 		    updated_at = CURRENT_TIMESTAMP
-	`, mac, req.Enabled, req.RechargeAmountBytes, req.RechargePeriod, req.PlafondBytes, nextRechargeAt)
+	`, mac, req.RechargeAmountBytes, req.RechargePeriod, req.PlafondBytes, nextRechargeAt)
 	return err
 }
 

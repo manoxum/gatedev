@@ -74,6 +74,38 @@ freq_to_channel() {
   fi
 }
 
+# sta_current_band_channel imprime "banda canal" (ex.: "2.4 6") a
+# partir da frequencia atual de associacao Wi-Fi cliente de
+# WIFI_INTERFACE ("freq:" de "iw dev <if> link"), ou falha se a
+# interface nao estiver associada agora. Usada por try_create_ap
+# (entrypoint.sh) para travar o AP no mesmo canal da estacao quando
+# WIFI_INTERFACE e INTERNET_INTERFACE sao a mesma placa (AP+STA
+# concorrente, Wi-Fi para Wi-Fi): um radio fisico so transmite numa
+# frequencia por vez, entao o AP nao pode ficar num canal/banda
+# diferente do link STA ativo nele - ignorar isso e o motivo mais
+# comum de "cliente associa mas nunca completa o DHCP"/instabilidade
+# nesse modo, mesmo quando o create_ap sobe sem erro aparente.
+sta_current_band_channel() {
+  local link_info
+  local freq
+  local channel
+
+  link_info="$(iw dev "${WIFI_INTERFACE}" link 2>/dev/null || true)"
+  [[ "${link_info}" == "Connected to"* ]] || return 1
+
+  freq="$(awk '/freq:/ {print $2; exit}' <<< "${link_info}")"
+  [[ -n "${freq}" ]] || return 1
+
+  channel="$(freq_to_channel "${freq}")"
+  [[ -n "${channel}" ]] || return 1
+
+  if (( ${freq%%.*} >= 5000 )); then
+    printf '5 %s\n' "${channel}"
+  else
+    printf '2.4 %s\n' "${channel}"
+  fi
+}
+
 channel_abs() {
   local value="$1"
   if (( value < 0 )); then

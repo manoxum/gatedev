@@ -36,18 +36,20 @@ resolve_internet_interface() {
   log "Interface de internet automatica escolhida: ${REAL_INTERNET_INTERFACE} ($(interface_speed_mbps "${REAL_INTERNET_INTERFACE}")Mbps reportados)."
 }
 
+# is_real_internet_interface so valida existencia/elegibilidade
+# estrutural (nao e uma interface virtual/dummy/loopback) - de
+# proposito NAO exclui WIFI_INTERFACE aqui: quando o usuario configura
+# INTERNET_INTERFACE=WIFI_INTERFACE explicitamente (Wi-Fi para Wi-Fi,
+# AP+STA concorrente no mesmo radio - ver aviso de
+# warn_if_concurrent_ap_sta_risky), essa e a interface real que o
+# create_ap vai mesmo usar como uplink, e validate_real_internet_interface/
+# apply_bindnet_uplink_rules precisam aceita-la. A exclusao de
+# WIFI_INTERFACE fica isolada em best_internet_interface (abaixo), que
+# so roda no modo INTERNET_INTERFACE=auto.
 is_real_internet_interface() {
   local iface="$1"
   [[ -d "/sys/class/net/${iface}" ]] || return 1
   [[ "${iface}" != "${BINDNET_UPLINK_INTERFACE}" ]] || return 1
-  # WIFI_INTERFACE nunca e candidata a internet, mesmo quando create_ap
-  # roda em --no-virt (a placa fisica do hotspot serve o AP diretamente,
-  # sem a interface virtual ap0/ap[0-9]* que o padrao abaixo ja exclui) -
-  # sem isso, o monitor automatico (best_internet_interface) pode
-  # escolher o proprio radio do hotspot como "fonte de internet" quando
-  # ele aparece UP, alternando NAT/forward para ele a cada ciclo
-  # (UPLINK_MONITOR_INTERVAL) e derrubando o beacon/clientes associados.
-  [[ "${iface}" != "${WIFI_INTERFACE}" ]] || return 1
   case "${iface}" in
     lo|ap0|ap[0-9]*|bn-*|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) return 1 ;;
   esac
@@ -82,6 +84,16 @@ pick_better_interface() {
   fi
 }
 
+# best_internet_interface so roda no modo INTERNET_INTERFACE=auto
+# (resolve_internet_interface/start_uplink_monitor). Exclui
+# WIFI_INTERFACE explicitamente aqui (e so aqui - ver comentario em
+# is_real_internet_interface acima): sem isso, a deteccao automatica
+# pode escolher o proprio radio do hotspot como "fonte de internet"
+# quando ele aparece UP, alternando NAT/forward para ele a cada ciclo
+# (UPLINK_MONITOR_INTERVAL) e derrubando o beacon/clientes associados.
+# Isso nao se aplica quando o usuario escolhe INTERNET_INTERFACE
+# explicitamente igual a WIFI_INTERFACE (Wi-Fi para Wi-Fi) - nesse
+# caso resolve_internet_interface nem chama esta funcao.
 best_internet_interface() {
   local line iface metric token index
   BEST_IFACE=""
@@ -102,6 +114,7 @@ best_internet_interface() {
     done
     [[ -n "${iface}" ]] || continue
     is_real_internet_interface "${iface}" || continue
+    [[ "${iface}" != "${WIFI_INTERFACE}" ]] || continue
     pick_better_interface "${iface}" "${metric}"
   done < <(ip -o route show default 2>/dev/null || true)
 
@@ -113,6 +126,7 @@ best_internet_interface() {
   for path in /sys/class/net/*; do
     iface="${path##*/}"
     is_real_internet_interface "${iface}" || continue
+    [[ "${iface}" != "${WIFI_INTERFACE}" ]] || continue
     [[ "$(cat "/sys/class/net/${iface}/operstate" 2>/dev/null || true)" == "up" ]] || continue
     pick_better_interface "${iface}" 999999
   done

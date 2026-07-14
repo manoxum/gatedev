@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   quotaValueToBytes,
   bytesToQuotaValue,
-  type HotspotLimits,
+  type HotspotGlobalLimits,
   type QuotaPeriod,
   type RateUnit,
 } from "@/components/hotspot/hotspot-limits-types";
@@ -14,7 +14,10 @@ const optionalPositiveInt = z
 
 const rateUnit = z.enum(["kbit", "mbit", "gbit", "kbyte", "mbyte", "gbyte"]);
 
-export const hotspotLimitsFormSchema = z.object({
+// So o limite global usa este schema/shape (cota unica + throttle) -
+// device/perfil usam hotspot-device-limits-schema.ts (tipo unico
+// ilimitado/credito/cota).
+export const hotspotGlobalLimitsFormSchema = z.object({
   downloadRateValue: optionalPositiveInt,
   downloadRateUnit: rateUnit,
   uploadRateValue: optionalPositiveInt,
@@ -28,16 +31,16 @@ export const hotspotLimitsFormSchema = z.object({
   quotaThrottleUploadUnit: rateUnit,
 });
 
-export type HotspotLimitsFormValues = z.infer<typeof hotspotLimitsFormSchema>;
+export type HotspotGlobalLimitsFormValues = z.infer<typeof hotspotGlobalLimitsFormSchema>;
 
-export function limitsToFormValues(limits: HotspotLimits): HotspotLimitsFormValues {
+export function globalLimitsToFormValues(limits: HotspotGlobalLimits): HotspotGlobalLimitsFormValues {
   return {
     downloadRateValue: limits.downloadRateValue?.toString() ?? "",
     downloadRateUnit: limits.downloadRateUnit,
     uploadRateValue: limits.uploadRateValue?.toString() ?? "",
     uploadRateUnit: limits.uploadRateUnit,
-    quotaValue: limits.quotaBytes ? String(Math.round(bytesToQuotaValue(limits.quotaBytes, "gbyte"))) : "",
-    quotaUnit: "gbyte",
+    quotaValue: limits.quotaBytes ? String(Math.round(bytesToQuotaValue(limits.quotaBytes, limits.quotaUnit))) : "",
+    quotaUnit: limits.quotaUnit,
     quotaPeriod: limits.quotaPeriod ?? "daily",
     quotaThrottleDownloadValue: limits.quotaThrottleDownloadValue?.toString() ?? "",
     quotaThrottleDownloadUnit: limits.quotaThrottleDownloadUnit,
@@ -46,7 +49,7 @@ export function limitsToFormValues(limits: HotspotLimits): HotspotLimitsFormValu
   };
 }
 
-export function formValuesToLimits(values: HotspotLimitsFormValues): HotspotLimits {
+export function formValuesToGlobalLimits(values: HotspotGlobalLimitsFormValues): HotspotGlobalLimits {
   const hasQuota = values.quotaValue !== "";
   return {
     downloadRateValue: values.downloadRateValue ? Number(values.downloadRateValue) : null,
@@ -54,6 +57,7 @@ export function formValuesToLimits(values: HotspotLimitsFormValues): HotspotLimi
     uploadRateValue: values.uploadRateValue ? Number(values.uploadRateValue) : null,
     uploadRateUnit: values.uploadRateUnit as RateUnit,
     quotaBytes: hasQuota ? quotaValueToBytes(Number(values.quotaValue), values.quotaUnit as RateUnit) : null,
+    quotaUnit: values.quotaUnit as RateUnit,
     quotaPeriod: hasQuota ? (values.quotaPeriod as QuotaPeriod) : null,
     quotaThrottleDownloadValue: values.quotaThrottleDownloadValue ? Number(values.quotaThrottleDownloadValue) : null,
     quotaThrottleDownloadUnit: values.quotaThrottleDownloadUnit as RateUnit,

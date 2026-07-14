@@ -1,17 +1,17 @@
-import type { HotspotTraffic } from "@/components/hotspot/hotspot-limits-types";
+import type { HotspotDeviceQuotaPeriodUsage, LimitType } from "@/components/hotspot/hotspot-limits-types";
 
 // Resposta de GET /api/hotspot/portal/me - reusa os mesmos nomes de
-// campo de HotspotTraffic (o backend monta a resposta assim de
-// proposito) para que HotspotQuotaProgress renderize sem alteração.
-export interface PortalMeResponse extends HotspotTraffic {
+// campo do backend (services/backend/hotspot_portal.go).
+export interface PortalMeResponse {
   mac: string;
   alias?: string;
   profileName?: string;
   blocked: boolean;
+  limitType: LimitType;
   blockedByCredit: boolean;
-  creditEnabled: boolean;
   balanceBytes: number;
   plafondBytes: number | null;
+  quotaPeriods?: HotspotDeviceQuotaPeriodUsage[];
 }
 
 export interface PortalCreditHistoryEntry {

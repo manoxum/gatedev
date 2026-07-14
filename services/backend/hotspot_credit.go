@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -28,8 +29,10 @@ type hotspotDeviceCredit struct {
 	Configured          bool
 }
 
+// hotspotCreditConfigRequest configura so a politica de recarga
+// (nunca "enabled" - isso e derivado do LimitType efetivo do
+// dispositivo, ver creditResponse e reconcileDeviceCredit).
 type hotspotCreditConfigRequest struct {
-	Enabled             bool    `json:"enabled"`
 	RechargeAmountBytes *int64  `json:"rechargeAmountBytes"`
 	RechargePeriod      *string `json:"rechargePeriod"`
 	PlafondBytes        *int64  `json:"plafondBytes"`
@@ -61,8 +64,13 @@ func registerHotspotCreditRoutes(mux *http.ServeMux, admin *administrator, db *s
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		limits, err := effectiveDeviceLimits(db, mac)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(creditResponse(credit))
+		_ = json.NewEncoder(w).Encode(creditResponse(credit, limits.LimitType))
 	}))
 
 	mux.HandleFunc("PATCH /api/hotspot/devices/{mac}/credit", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
@@ -99,16 +107,25 @@ func registerHotspotCreditRoutes(mux *http.ServeMux, admin *administrator, db *s
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		limits, err := effectiveDeviceLimits(db, mac)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		username, _ := sessionUser(r, admin)
 		audit.record(r.Context(), "device_credit_recharged", username, map[string]any{"mac": mac, "amountBytes": req.AmountBytes})
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(creditResponse(credit))
+		_ = json.NewEncoder(w).Encode(creditResponse(credit, limits.LimitType))
 	}))
 }
 
-func creditResponse(credit hotspotDeviceCredit) hotspotCreditResponse {
+// creditResponse monta a resposta publica do credito - Enabled e
+// sempre derivado do LimitType efetivo do dispositivo (nunca da coluna
+// "enabled" gravada em hotspot_device_credit, que ficou vestigial - ver
+// hotspot_device_limits.go e syncDeviceCreditFromProfile).
+func creditResponse(credit hotspotDeviceCredit, effectiveType limitType) hotspotCreditResponse {
 	response := hotspotCreditResponse{
-		Enabled:             credit.Enabled,
+		Enabled:             effectiveType == limitTypeCredit,
 		BalanceBytes:        credit.BalanceBytes,
 		RechargeAmountBytes: credit.RechargeAmountBytes,
 		RechargePeriod:      credit.RechargePeriod,
@@ -138,7 +155,9 @@ func ensureDeviceCreditRow(db *sql.DB, mac string) (hotspotDeviceCredit, error) 
 // debitDeviceCredit desconta o total trafegado (download+upload) de um
 // ciclo de reconciliacao do saldo de credito - chamado pelo loop em
 // hotspot_reconcile.go, so quando o dispositivo tem credito habilitado.
-func debitDeviceCredit(db *sql.DB, mac string, totalBytes int64) (newBalance int64, err error) {
+// O trace do debito vai para o Mongo (creditTrace, alto volume, com
+// TTL - ver hotspot_credit_trace.go) em vez do Postgres.
+func debitDeviceCredit(ctx context.Context, db *sql.DB, creditTrace *creditTraceClient, mac string, totalBytes int64) (newBalance int64, err error) {
 	err = db.QueryRow(`
 		UPDATE hotspot_device_credit
 		SET balance_bytes = balance_bytes - $2, updated_at = CURRENT_TIMESTAMP
@@ -148,7 +167,7 @@ func debitDeviceCredit(db *sql.DB, mac string, totalBytes int64) (newBalance int
 	if err != nil {
 		return 0, err
 	}
-	if err := recordCreditHistory(db, mac, "debit", -totalBytes, newBalance); err != nil {
+	if err := creditTrace.recordDebit(ctx, mac, -totalBytes, newBalance); err != nil {
 		return 0, err
 	}
 	return newBalance, nil

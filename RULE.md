@@ -162,6 +162,41 @@ Regras:
   modo AP "preso".
 - O container precisa rodar `privileged: true` e `network_mode: host`
   porque manipula diretamente a interface Wi-Fi física do host.
+- **Detecção de falha de beacon e auto-recuperação em duas camadas**
+  (`services/worker/hotspot/watchdog.sh` + laço de retry no fim de
+  `entrypoint.sh` + `reconcileHotspotOnce` em
+  `services/backend/hotspot_reconcile.go`): alguns drivers/kernels
+  reproduzem uma regressão conhecida do hostapd 2.11 (802.11be/MLO —
+  ver comentário no `Dockerfile`, que por isso fixa `hostapd=2.10-r6`)
+  onde, após um cliente Wi-Fi associar/reassociar com o AP já de pé, o
+  adaptador passa a recusar `Failed to set beacon parameters`
+  indefinidamente sem o `create_ap` sair sozinho — o hotspot fica
+  "vivo" mas inutilizável para novos clientes.
+  - **Camada 1 (worker, imediata)**: o hotspot acompanha seu próprio
+    log em tempo real e, se essa falha se repetir
+    (`HOTSPOT_BEACON_FAILURE_THRESHOLD`, padrão 2, dentro de
+    `HOTSPOT_BEACON_FAILURE_WINDOW_SECONDS`, padrão 20 — variáveis de
+    ambiente do container, sem equivalente no painel), derruba o
+    `create_ap` (mesmo sinal de parada limpa usado por
+    `stop`/`SIGTERM`). O próprio `entrypoint.sh`, na mesma execução do
+    script, detecta que o `create_ap` caiu sem que uma parada de
+    verdade tenha sido pedida e tenta de novo no lugar, com backoff
+    crescente (`HOTSPOT_RESTART_BACKOFF_SECONDS`, padrão 3s por
+    tentativa) até `HOTSPOT_MAX_RESTART_ATTEMPTS` (padrão 5) — a nova
+    tentativa começa direto pelo último canal/banda que funcionou
+    nesta execução (evita repetir uma varredura completa, incluindo
+    bandas travadas por regulamentação de firmware que nunca vão
+    funcionar). `cleanup()` usa `timeout` ao chamar `create_ap --stop`
+    para nunca travar indefinidamente esperando uma instância presa
+    num loop de erro do driver.
+  - **Camada 2 (backend, rede de segurança, ciclo de 15s)**: se as
+    tentativas locais do worker se esgotarem (ou o processo cair por
+    qualquer outro motivo, incluindo o container/host reiniciar),
+    `reconcileHotspotOnce` detecta `"running": false"` e, se a última
+    intenção do admin foi ligar (`POST /api/hotspot/start`, nunca
+    desfeita por um `POST /api/hotspot/stop`), religa sozinho pelo
+    mesmo caminho de `autoStartHotspotOnBoot`. Uma parada deliberada
+    pelo painel nunca é desfeita por nenhuma das duas camadas.
 
 ## Ligar/desligar/recuperar o hotspot pelo painel (`POST /api/hotspot/start` / `/stop` / `/recover-wifi`)
 
@@ -273,31 +308,63 @@ scripts tinham, só que dentro do container privilegiado em vez de
 ## Perfis de dispositivo, vouchers de recarga e portal cativo (`services/backend/hotspot_profiles*.go`, `hotspot_vouchers.go`, `hotspot_portal.go`)
 
 - **Perfil** (`hotspot_profiles`) é um bundle nomeado e reutilizável de
-  limites de tráfego (mesmas 10 colunas de `hotspot_device_limits`) +
-  política de crédito (subconjunto de `hotspot_device_credit`: apenas
-  `enabled`/`rechargeAmountBytes`/`rechargePeriod`/`plafondBytes` — nunca
+  limites de tráfego (mesmo shape de `hotspot_device_limits`) + política
+  de recarga de crédito (subconjunto de `hotspot_device_credit`: apenas
+  `rechargeAmountBytes`/`rechargePeriod`/`plafondBytes` — nunca
   saldo/estado). Existe um perfil "Padrão" com id fixo
   (`00000000-0000-0000-0000-000000000001`, protegido contra remoção),
   vinculado por padrão a todo dispositivo (`hotspot_device_info.profile_id`
   tem esse valor como `DEFAULT`, aplicado inclusive a linhas já
   existentes quando a coluna foi criada).
-- **Ordem de resolução por dispositivo é sempre override > perfil >
-  global**, nunca o contrário:
-  - `effectiveDeviceLimits` (`hotspot_profiles_apply.go`): se o MAC tem
-    linha em `hotspot_device_limits` (configurada manualmente via
-    `PATCH /api/hotspot/devices/{mac}/limits`), essa vence; senão usa o
-    perfil vinculado. Nunca cai para `hotspot_global_limits` — o limite
-    global já é uma camada HTB separada e sempre ativa.
-  - `syncDeviceCreditFromProfile`: só sincroniza a política de crédito
-    do perfil quando `hotspot_device_credit.configured = false`. Essa
-    coluna (distinta de "a linha existe", já que `ensureDeviceCreditRow`
-    cria a linha de forma preguiçosa para qualquer MAC visto) vira
-    `true` assim que o admin configura crédito manualmente
-    (`PATCH .../credit`) ou o dispositivo resgata um voucher — a partir
-    daí o perfil para de influenciar aquele MAC.
+- **Tipo de limitação (`limitType`) é único e mutuamente exclusivo**,
+  tanto em perfil quanto em override de dispositivo (`hotspot_device_limits.limit_type`):
+  `unlimited` (nenhum teto), `credit` (precisa de saldo, política em
+  `hotspot_device_credit`), `quota` (até 3 tetos simultâneos e
+  independentes — diário/semanal/mensal, cada um com seu acumulador em
+  `hotspot_device_quota_periods` e bloqueio rígido ao estourar) ou
+  `custom` (só válido em **perfil** — ver abaixo). Taxa
+  (download/upload, Mbps) é sempre independente do tipo, configurável
+  nos 4 casos. Esse tipo único existe para impedir cota e crédito
+  ficarem ativos ao mesmo tempo no mesmo perfil/dispositivo (causa
+  histórica de bloqueio por crédito disfarçado de "cota parou de
+  contabilizar").
+- **`limitType = "custom"` delega a decisão para o dispositivo**: um
+  perfil "customizado" não aplica limite nenhum por si só — o
+  dispositivo vinculado a ele é quem escolhe sua própria estratégia
+  (`unlimited`/`credit`/`quota`, nunca `custom` — um dispositivo é
+  sempre o último nível, não há para quem delegar de novo) via
+  `PATCH /api/hotspot/devices/{mac}/limits`. `PATCH` nessa rota é
+  **rejeitado com 409** se o perfil vinculado não for `custom` no
+  momento da chamada.
+- **Ordem de resolução por dispositivo é sempre perfil, a menos que o
+  perfil seja `custom`** (nunca override > perfil como um fallback
+  genérico, e nunca cai para `hotspot_global_limits` — o limite global
+  já é uma camada HTB separada e sempre ativa):
+  - `effectiveDeviceLimits` (`hotspot_profiles_apply.go`): resolve o
+    perfil vinculado ao MAC; se `limitType != "custom"`, os valores do
+    perfil valem inteiros (um override antigo em `hotspot_device_limits`
+    fica dormente/ignorado enquanto isso). Só quando o perfil é
+    `custom` é que a linha do dispositivo em `hotspot_device_limits`
+    passa a valer — na ausência dela, o padrão é `unlimited`.
+  - `syncDeviceCreditFromProfile`: decide se crédito está ativo sempre
+    pelo `LimitType` **efetivo** (`effectiveDeviceLimits`, já
+    resolvido), nunca pelo `limitType` cru do perfil — um dispositivo
+    com override `credit` sob perfil `custom` também conta como
+    crédito ativo. A política de recarga (`rechargeAmountBytes`/
+    `rechargePeriod`/`plafondBytes`), porém, só é herdada do perfil
+    quando é o próprio perfil (não `custom`) que dá origem ao crédito;
+    sob perfil `custom` o dispositivo configura sua própria política
+    via `PATCH .../credit`. Em qualquer caso, só age quando
+    `hotspot_device_credit.configured = false` — vira `true` assim que
+    o admin configura crédito manualmente ou o dispositivo resgata um
+    voucher (que também força `limitType = "credit"` no override do
+    dispositivo, já que resgate é auto-serviço sem acesso à aba de
+    limites) — a partir daí o perfil para de influenciar aquele MAC.
   - Editar um perfil (`PATCH /api/hotspot/profiles/{id}`) reaplica ao
-    vivo (`applyProfileShapingLive`) só nos dispositivos conectados que
-    herdam dele sem override próprio.
+    vivo (`applyProfileShapingLive`) em todo dispositivo conectado
+    vinculado a ele, sem pular quem tem override próprio — desde que
+    `effectiveDeviceLimits` já decide sozinho se esse override importa
+    (só quando o perfil é `custom`).
 - **Vouchers** (`hotspot_vouchers`) são códigos de recarga
   (`XXXX-XXXX-XXXX`, `crypto/rand`) com valor fixo em bytes, emitidos em
   lote pelo admin (`POST /api/hotspot/vouchers`, até 100 por vez) e
@@ -632,14 +699,51 @@ Regras:
   O `backend` só sobe depois dele terminar com sucesso
   (`depends_on: migration: condition: service_completed_successfully`
   no `docker-compose.yml`) — nunca cria/altera tabelas sozinho.
-- **Mongo guarda só a trilha de auditoria do painel** — eventos
-  discretos de ações administrativas: `login`, `logout`,
-  `config_changed` (hotspot/DNS), `certificate_issued`,
+- **Mongo guarda a trilha de auditoria do painel** (coleção
+  `audit_log`) — eventos discretos de ações administrativas: `login`,
+  `logout`, `config_changed` (hotspot/DNS), `certificate_issued`,
   `certificate_revoked`, `hotspot_started`, `hotspot_stopped`,
   `dns_applied`. **Não** persiste logs de containers — isso continua
   sendo só streaming ao vivo via `worker` (`LogsPanel.tsx`,
   `worker.streamLogs`). Falha ao gravar auditoria nunca derruba a ação
-  principal do usuário (só loga o erro).
+  principal do usuário (só loga o erro). Mongo também guarda o **trace
+  bruto de consumo do hotspot** (coleção `hotspot_credit_debits`,
+  `services/backend/hotspot_credit_trace.go`) — uma linha por ciclo de
+  reconciliação (a cada 15s) com o tráfego do dispositivo naquele
+  ciclo, gravada pra **todo dispositivo conectado**, com ou sem crédito
+  habilitado (só quando habilitado é que o mesmo valor também desconta
+  `hotspot_device_credit.balance_bytes`, ver `reconcileDeviceCredit`)
+  — é esse trace que alimenta o detalhe de consumo ao clicar numa
+  sessão (`GET .../sessions/{id}/consumption`). É o item de maior
+  volume da conta corrente, por isso não mora no Postgres: expira
+  sozinho via índice TTL em `createdAt`, com a retenção controlada por
+  `HOTSPOT_CREDIT_TRACE_RETENTION_DAYS` (padrão 180 dias/6 meses).
+- **Postgres consolida o consumo por sessão de conexão**
+  (`hotspot_device_sessions`, `services/backend/hotspot_sessions.go`)
+  em vez de guardar um trace por ciclo de reconciliação: uma sessão
+  nasce quando o MAC aparece na lista de clientes ao vivo do hotspot e
+  fecha (`ended_at`) quando some dela (ou quando o hotspot para). A
+  cada ciclo de reconciliação, o tráfego real do dispositivo
+  (`deltaDown+deltaUp`, o mesmo delta de `recordDeviceUsage`)
+  incrementa `total_bytes` da sessão aberta daquele MAC — **sempre**,
+  independente de o dispositivo ter crédito habilitado (débito de
+  saldo é uma consequência separada, só para quem tem crédito, ver
+  `reconcileDeviceCredit`). Isso mantém o total consolidado disponível
+  mesmo depois do TTL apagar o trace bruto de débito de crédito no
+  Mongo, servindo de conferência posterior.
+- **A conta corrente de crédito é uma única lista, toda em Postgres**
+  (`GET /api/hotspot/devices/{mac}/credit/history`,
+  `services/backend/hotspot_credit_history.go`; aba "Movimentações" no
+  detalhe do dispositivo): mescla recarga manual/automática/resgate de
+  voucher (`hotspot_device_credit_history`, sem TTL — eventos raros,
+  ligados a ação humana ou dinheiro) com **toda sessão** de conexão
+  (`hotspot_device_sessions`, ativa ou encerrada, com ou sem consumo
+  ainda) como linha de débito `session_active`/`session_closed`. Essa
+  lista nunca consulta o Mongo diretamente — só ao clicar numa linha de
+  sessão específica é que `GET .../sessions/{id}/consumption` busca lá
+  o trace bruto daquela janela de tempo (`started_at`–`ended_at`), que
+  pode já ter expirado pelo TTL. A UI permite filtrar por tipo (crédito/
+  débito ou o `entryType` específico).
 - **MinIO está provisionado mas sem uso ainda** — nenhum endpoint do
   `backend` usa isso hoje; existe só para necessidade futura de
   armazenamento de arquivos.
