@@ -7,6 +7,9 @@ FROM alpine:3.22
 # sempre, fazendo o create_ap concluir (errado, em qualquer adaptador)
 # que o modo concorrente nao e suportado. GNU grep trata "{" solto como
 # literal (extensao GNU), igual o create_ap espera.
+# util-linux-misc: pacote separado do "util-linux" no Alpine que traz
+# o binario "rfkill" (usado por ensure_wifi_radio_unblocked, ver
+# regulatory.sh) - o Alpine nao tem um pacote "rfkill" avulso.
 RUN apk add --no-cache \
     bash \
     curl \
@@ -19,6 +22,7 @@ RUN apk add --no-cache \
     postgresql-client \
     procps \
     util-linux \
+    util-linux-misc \
     wireless-tools
 
 # hostapd: fixado em 2.10-r6 (repo da Alpine 3.20, ultima versao antes
@@ -63,8 +67,8 @@ RUN curl -fsSL https://raw.githubusercontent.com/oblique/create_ap/master/create
 	    && rm /tmp/patch-create-ap.sh \
 	    && chmod +x /usr/local/bin/create_ap
 
-COPY entrypoint.sh channel.sh interfaces.sh regulatory.sh watchdog.sh /usr/local/bin/
+COPY entrypoint.sh channel.sh interfaces.sh regulatory.sh watchdog.sh history.sh /usr/local/bin/
 RUN mv /usr/local/bin/entrypoint.sh /usr/local/bin/hotspot-entrypoint.sh \
-    && chmod +x /usr/local/bin/hotspot-entrypoint.sh /usr/local/bin/channel.sh /usr/local/bin/interfaces.sh /usr/local/bin/regulatory.sh /usr/local/bin/watchdog.sh
+    && chmod +x /usr/local/bin/hotspot-entrypoint.sh /usr/local/bin/channel.sh /usr/local/bin/interfaces.sh /usr/local/bin/regulatory.sh /usr/local/bin/watchdog.sh /usr/local/bin/history.sh
 
 ENTRYPOINT ["/usr/local/bin/hotspot-entrypoint.sh"]

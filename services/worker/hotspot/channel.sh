@@ -47,6 +47,26 @@ resolve_wifi_band() {
 
   ip link set "${WIFI_INTERFACE}" up >/dev/null 2>&1 || true
 
+  # Wi-Fi para Wi-Fi nunca usa essa preferencia de verdade (o canal e
+  # sempre travado pelo canal da estacao dentro de try_create_ap,
+  # entrypoint.sh) - so consulta o historico quando a banda escolhida
+  # aqui realmente importa (Ethernet para Wi-Fi/auto). Prefere a banda
+  # com historico de sucesso real melhor em vez de sempre comecar pela
+  # banda preferida por capacidade de hardware (5GHz): sem isso, uma
+  # placa com trava regulatoria de firmware que rejeita 5GHz inteiro
+  # (ver regulatory.sh) reaprende essa mesma licao do zero, testando
+  # todos os candidatos de 5GHz de novo, toda vez que o hotspot sobe.
+  if [[ "${WIFI_INTERFACE}" != "${REAL_INTERNET_INTERFACE}" ]]; then
+    local score_5 score_24
+    score_5="$(band_history_score "5")"
+    score_24="$(band_history_score "2.4")"
+    if (( score_24 > score_5 )); then
+      WIFI_FREQ_BAND="2.4"
+      log "Banda Wi-Fi automatica escolhida: 2.4GHz (historico de sucesso melhor: ${score_24} contra ${score_5} em 5GHz)."
+      return
+    fi
+  fi
+
   if band_supported "5"; then
     WIFI_FREQ_BAND="5"
   elif band_supported "2.4"; then
@@ -98,6 +118,31 @@ freq_to_channel() {
 # travar tempo demais numa queda genuina (essa ainda reprova todas as
 # tentativas e retorna erro normalmente).
 sta_link_connected() {
+  # A paciencia abaixo so faz sentido quando WIFI_INTERFACE tambem e a
+  # fonte de internet (Wi-Fi para Wi-Fi): so nesse modo existe uma
+  # associacao STA que realmente importa preservar, e blips de
+  # varredura de fundo sao esperados. Em qualquer outro modo (ex.:
+  # Ethernet para Wi-Fi), a interface foi deliberadamente desconectada/
+  # desgerenciada antes do hotspot subir (unmanageWifiInterfaceIfIdle,
+  # services/worker/controller/compose.go) - ela nunca vai "reconectar"
+  # a nenhum STA, entao esperar aqui so soma segundos de espera inutil
+  # a cada candidato de canal testado (rank_channels_for_band chama
+  # try_create_ap uma vez por candidato - 8+ candidatos x 8s cada
+  # atrasava a subida do hotspot em mais de um minuto).
+  if [[ "${WIFI_INTERFACE}" != "${REAL_INTERNET_INTERFACE}" ]]; then
+    # "if ... | grep -q; then return 0; fi; return 1" em vez de rodar o
+    # pipe solto e devolver "$?" direto: um pipe solto (nao condicao de
+    # if/while) com pipefail conta como comando falho pro set -e do
+    # topo do script quando o grep nao acha nada (caso normal aqui,
+    # placa desconectada de proposito) - risco confirmado ao vivo em
+    # ensure_wifi_radio_unblocked (regulatory.sh), que matava o script
+    # inteiro em silencio pelo mesmo motivo.
+    if iw dev "${WIFI_INTERFACE}" link 2>/dev/null | grep -q '^Connected to '; then
+      return 0
+    fi
+    return 1
+  fi
+
   local attempts="${STA_LINK_CHECK_ATTEMPTS:-20}"
   local interval="${STA_LINK_CHECK_INTERVAL_SECONDS:-0.4}"
   local attempt
@@ -225,6 +270,7 @@ rank_channels_for_band() {
   channels="$(candidate_channels)"
   ip link set "${WIFI_INTERFACE}" up >/dev/null 2>&1 || true
   scan="$(iw dev "${WIFI_INTERFACE}" scan 2>/dev/null || iw dev "${WIFI_INTERFACE}" scan ap-force 2>/dev/null || true)"
+  load_channel_history_scores "${band}"
 
   while read -r freq; do
     [[ -n "${freq}" ]] || continue
@@ -239,7 +285,13 @@ rank_channels_for_band() {
       exit 1
     fi
 
-    score=0
+    # Historico (channel_history_score, history.sh) pesa muito mais que
+    # interferencia ao vivo de proposito - um canal que ja falhou
+    # consistentemente antes (ex.: "adapter can not transmit") deve
+    # sempre ir pro fim da fila, mesmo que o scan ao vivo o mostre como
+    # o menos congestionado agora; interferencia so desempata entre
+    # candidatos com o mesmo historico (incluindo nenhum ainda).
+    score="$(channel_history_score "${candidate}")"
     for observed_channel in "${observed_channels[@]}"; do
       score=$((score + $(score_channel "${candidate}" "${observed_channel}")))
     done

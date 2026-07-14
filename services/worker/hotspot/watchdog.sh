@@ -28,13 +28,30 @@ HOTSPOT_BEACON_FAILURE_THRESHOLD="${HOTSPOT_BEACON_FAILURE_THRESHOLD:-2}"
 start_beacon_failure_watcher() {
   local log_file="$1"
   local target_pid="$2"
+  local band="$3"
+  local channel="$4"
 
   (
     local count=0
     local window_start
+    local ap_enabled_recorded=0
     window_start="$(date +%s)"
     tail -n0 -F "${log_file}" 2>/dev/null | while IFS= read -r line; do
       case "${line}" in
+        *"AP-ENABLED"*)
+          # Registra sucesso no historico (history.sh) ao vivo, no
+          # instante em que o canal/banda realmente funcionou - nunca
+          # depois de "wait \$CREATE_AP_PID" retornar em try_create_ap
+          # (entrypoint.sh), porque isso so acontece quando o create_ap
+          # eventualmente sai (parada pedida, dias depois, ou uma queda
+          # por outro motivo) e nao no momento do sucesso de verdade.
+          # "ap_enabled_recorded" evita registrar de novo se a linha
+          # aparecer mais de uma vez por algum motivo.
+          if [[ "${ap_enabled_recorded}" -eq 0 ]]; then
+            ap_enabled_recorded=1
+            record_channel_result "${band}" "${channel}" 1
+          fi
+          ;;
         *"Failed to set beacon parameters"*)
           local now
           now="$(date +%s)"

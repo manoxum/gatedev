@@ -240,3 +240,32 @@ export function formatSpeedNow(bytesPerSecond: number, nature: ByteNature) {
   const value = bytesPerSecond / divisor;
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)}${label}/s`;
 }
+
+// O backend amostra download/upload a cada 1s SEMPRE, mesmo pra
+// janelas longas (sem downsampling no servidor - ver
+// hotspot_device_speed_history.go), entao rajadas curtas de trafego
+// (um download que termina, um refresh de pagina) viram dente-de-serra
+// no grafico bruto. smoothSpeedSamples aplica uma media movel
+// centrada, com janela proporcional ao total de amostras (mais
+// amostras = janela maior, ate o teto), pra suavizar sem esconder a
+// tendencia real. Usada por DeviceSpeedChart.tsx e
+// HotspotGlobalSpeedPanel.tsx antes de montar a serie do ApexCharts -
+// o tooltip continua mostrando o valor (ja suavizado) daquele ponto.
+export function smoothSpeedSamples<T extends { downloadBps: number; uploadBps: number }>(samples: T[]): T[] {
+  const windowSize = Math.min(31, Math.max(3, Math.round(samples.length / 60)));
+  if (samples.length < windowSize) return samples;
+
+  const half = Math.floor(windowSize / 2);
+  return samples.map((sample, i) => {
+    const start = Math.max(0, i - half);
+    const end = Math.min(samples.length, i + half + 1);
+    let downloadSum = 0;
+    let uploadSum = 0;
+    for (let j = start; j < end; j++) {
+      downloadSum += samples[j].downloadBps;
+      uploadSum += samples[j].uploadBps;
+    }
+    const count = end - start;
+    return { ...sample, downloadBps: downloadSum / count, uploadBps: uploadSum / count };
+  });
+}

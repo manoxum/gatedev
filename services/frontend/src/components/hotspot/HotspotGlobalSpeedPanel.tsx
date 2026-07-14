@@ -3,7 +3,7 @@ import Chart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 import { SpeedGauge } from "@/components/ui/speed-gauge";
 import { useApexChartColors } from "@/components/hotspot/apex-chart-theme";
-import { pickByteScale, toBitsPerSecond } from "@/components/hotspot/hotspot-limits-types";
+import { pickByteScale, smoothSpeedSamples, toBitsPerSecond } from "@/components/hotspot/hotspot-limits-types";
 import { useGlobalSpeedHistory, useGlobalStats } from "@/components/hotspot/useHotspotQueries";
 
 const TREND_WINDOW_MINUTES = 5;
@@ -24,7 +24,8 @@ export function HotspotGlobalSpeedPanel() {
   const gaugeMaxHistory = useGlobalSpeedHistory(GAUGE_MAX_WINDOW_MINUTES);
   const colors = useApexChartColors();
 
-  const samples = history.data ?? [];
+  const rawSamples = history.data ?? [];
+  const samples = useMemo(() => smoothSpeedSamples(rawSamples), [rawSamples]);
   const hasTrend = samples.length >= 2;
   const maxAbs = Math.max(...samples.flatMap((sample) => [sample.downloadBps, sample.uploadBps]), 1);
   const { divisor, label } = pickByteScale(maxAbs, "bit");

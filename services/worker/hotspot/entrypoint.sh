@@ -293,17 +293,26 @@ WIFI_FREQ_BAND="${WIFI_FREQ_BAND:-auto}"
 # channel.sh: selecao de banda/canal Wi-Fi. interfaces.sh: resolucao/
 # avisos sobre a interface de internet. regulatory.sh: diagnostico do
 # dominio regulatorio Wi-Fi. watchdog.sh: deteccao em tempo real de
-# falha de beacon do create_ap. Todos sourced do mesmo diretorio deste
-# script (ver Dockerfile - os cinco arquivos vao para /usr/local/bin/).
+# falha de beacon do create_ap. history.sh: historico de sucesso/falha
+# por banda/canal, usado por channel.sh pra priorizar candidatos.
+# Todos sourced do mesmo diretorio deste script (ver Dockerfile - os
+# seis arquivos vao para /usr/local/bin/). history.sh precisa vir antes
+# de channel.sh, que chama suas funcoes.
+source "$(dirname "$0")/history.sh"
 source "$(dirname "$0")/channel.sh"
 source "$(dirname "$0")/interfaces.sh"
 source "$(dirname "$0")/regulatory.sh"
 source "$(dirname "$0")/watchdog.sh"
 
-# So informativo - roda uma vez no inicio pra deixar visivel no log
-# qualquer trava regulatoria de firmware (phy self-managed) antes de
-# qualquer tentativa de canal, ja que isso e indistinguivel do lado de
-# fora de "adapter can not transmit" em canal especifico.
+# ensure_wifi_radio_unblocked primeiro: um radio bloqueado por rfkill
+# faz "iw reg get"/"iw phy info" logo abaixo se comportarem de forma
+# estranha tambem, alem de rejeitar todos os canais igualmente. So
+# informativo dai em diante - log_wifi_regulatory_info roda uma vez no
+# inicio pra deixar visivel no log qualquer trava regulatoria de
+# firmware (phy self-managed) antes de qualquer tentativa de canal, ja
+# que isso e indistinguivel do lado de fora de "adapter can not
+# transmit" em canal especifico.
+ensure_wifi_radio_unblocked
 log_wifi_regulatory_info
 
 normalize_search_domains() {
@@ -468,8 +477,13 @@ try_create_ap() {
     log "${WIFI_INTERFACE} sem associacao Wi-Fi cliente; usando a interface fisica diretamente em modo AP (--no-virt)."
   fi
 
+  local band_display="${band}GHz"
+  [[ "${ORIGINAL_WIFI_FREQ_BAND}" == "auto" ]] && band_display="auto (${band}GHz)"
+  local channel_display="${channel}"
+  [[ "${WIFI_CHANNEL}" == "auto" ]] && channel_display="auto (${channel})"
+
   log "Preparando hotspot '${WIFI_SSID}' em ${WIFI_INTERFACE}, internet via ${CREATE_AP_INTERNET_INTERFACE} (alimentado por ${REAL_INTERNET_INTERFACE})."
-  log "Regiao Wi-Fi: ${country}; banda: ${band}GHz; canal: ${channel}."
+  log "Regiao Wi-Fi: ${country}; banda: ${band_display}; canal: ${channel_display}."
   log "Gateway do hotspot: ${HOTSPOT_GATEWAY}; DNS entregues por DHCP: ${DHCP_DNS_SERVERS}."
   log "Dominios de busca entregues por DHCP: ${DHCP_SEARCH_DOMAINS}."
 
@@ -495,10 +509,25 @@ try_create_ap() {
     "${WIFI_SSID}" \
     "${WIFI_PASSWORD}" > >(tee "${CREATE_AP_LOG}") 2>&1 &
   CREATE_AP_PID=$!
-  start_beacon_failure_watcher "${CREATE_AP_LOG}" "${CREATE_AP_PID}"
+  start_beacon_failure_watcher "${CREATE_AP_LOG}" "${CREATE_AP_PID}" "${band}" "${channel}"
   wait "${CREATE_AP_PID}" || status=$?
   stop_beacon_failure_watcher
   CREATE_AP_PID=
+
+  # Registra falha no historico persistente (history.sh) se o AP nunca
+  # chegou a subir nesse banda/canal - "AP-ENABLED" ausente do log e o
+  # sinal confiavel de que o adaptador rejeitou mesmo, independente do
+  # "status" (que so reflete o resultado final de "wait", incluindo
+  # quedas por outro motivo bem depois de ter subido). O SUCESSO ja foi
+  # registrado ao vivo por start_beacon_failure_watcher (watchdog.sh)
+  # no instante em que "AP-ENABLED" apareceu - nao registrar de novo
+  # aqui: "wait" so retorna quando o create_ap eventualmente sai
+  # (parada pedida, possivelmente dias depois, ou uma queda por outro
+  # motivo), nunca no momento do sucesso de verdade, entao nunca
+  # sobrescreve/duplica o que ja foi contado.
+  if ! grep -q 'AP-ENABLED' "${CREATE_AP_LOG}" 2>/dev/null; then
+    record_channel_result "${band}" "${channel}" 0
+  fi
 
   # LAST_GOOD_BAND/LAST_GOOD_CHANNEL (globais, declaradas mais abaixo)
   # guardam o ultimo canal que realmente conseguiu subir o AP nesta

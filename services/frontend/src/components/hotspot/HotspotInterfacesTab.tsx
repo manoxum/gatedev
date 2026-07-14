@@ -17,7 +17,7 @@ interface HotspotInterfacesTabProps {
   networkInterfaces: NetworkInterface[];
 }
 
-function interfaceLabel(i: NetworkInterface) {
+export function interfaceLabel(i: NetworkInterface) {
   const speed = i.speedMbps ? `, ${i.speedMbps}Mbps` : "";
   return `${i.name} (${i.type}, ${i.state}${speed})`;
 }

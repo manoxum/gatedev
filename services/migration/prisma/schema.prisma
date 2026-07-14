@@ -152,6 +152,29 @@ model HotspotConfig {
   @@map("hotspot_config")
 }
 
+// Historico de sucesso/falha por combinacao (placa Wi-Fi, modo, banda,
+// canal) do hotspot (services/worker/hotspot/history.sh) - usado pra
+// priorizar, na proxima subida, os candidatos que ja funcionaram antes
+// em vez de sempre reavaliar do zero. "mode" distingue 'same-interface'
+// (Wi-Fi para Wi-Fi, canal travado pela estacao) de
+// 'different-interface' (canal escolhido livremente, ex. Ethernet para
+// Wi-Fi).
+model HotspotChannelHistory {
+  id            BigInt    @id @default(autoincrement())
+  wifiInterface String    @map("wifi_interface")
+  mode          String
+  band          String
+  channel       Int
+  successCount  Int       @default(0) @map("success_count")
+  failureCount  Int       @default(0) @map("failure_count")
+  lastResult    String?   @map("last_result")
+  lastAttemptAt DateTime? @map("last_attempt_at") @db.Timestamptz
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@unique([wifiInterface, mode, band, channel])
+  @@map("hotspot_channel_history")
+}
+
 // MACs bloqueados manualmente pelo painel (tela "Clientes conectados"
 // do hotspot). services/backend reaplica esta lista via
 // "hostapd_cli deny_acl" (services/worker/controller/hotspot_acl.go)

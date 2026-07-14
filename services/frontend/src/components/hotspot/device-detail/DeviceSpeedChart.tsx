@@ -9,6 +9,7 @@ import {
   formatSpeedNow,
   pickByteScale,
   rateToBps,
+  smoothSpeedSamples,
   toBitsPerSecond,
   type ByteNature,
 } from "@/components/hotspot/hotspot-limits-types";
@@ -135,7 +136,8 @@ export function DeviceSpeedChart({
 }) {
   const history = useDeviceSpeedHistory(mac, windowMinutes);
   const colors = useApexChartColors();
-  const samples = history.data ?? [];
+  const rawSamples = history.data ?? [];
+  const samples = useMemo(() => smoothSpeedSamples(rawSamples), [rawSamples]);
 
   const maxAbs = Math.max(...samples.flatMap((sample) => [sample.downloadBps, sample.uploadBps]), 1);
   const { divisor, label } = pickByteScale(maxAbs, unitNature);

@@ -41,6 +41,28 @@ Regras:
 - `WIFI_CHANNE` (sem "L") é aceito como alias legado de
   `WIFI_CHANNEL`, com aviso de depreciação no log. Não usar em
   configurações novas.
+- **`ensure_wifi_radio_unblocked`** (`regulatory.sh`) roda uma vez no
+  início, antes de qualquer diagnóstico regulatório ou tentativa de
+  canal: confere via `rfkill list wifi` se o rádio Wi-Fi está
+  bloqueado (soft ou hard) e, se estiver, tenta `rfkill unblock wifi`
+  automaticamente. Um rádio bloqueado rejeita **todos** os
+  canais/bandas igualmente com erros genéricos do driver (ex.:
+  `RTNETLINK answers: No error information`), indistinguível de fora
+  de uma trava regulatória ou de canal específico — sem essa checagem,
+  o hotspot esgotaria todos os candidatos de 2.4GHz e 5GHz (e as 5
+  tentativas do loop de retry) sem nunca revelar a causa real. Um
+  `docker compose up --build` que recria o container `hotspot` com o
+  `create_ap` ativo (interrompendo a limpeza normal no meio — ver
+  `stop_grace_period` do serviço `hotspot` no
+  `docker-compose.services.yml`, aumentado pra 30s de propósito, acima
+  do pior caso de `force_stop_create_ap`) já deixou o driver `iwlwifi`
+  reportando bloqueio "hard" via `rfkill` numa sessão real, e um
+  `rfkill unblock` comum (sem privilégio de root) resolveu de verdade
+  — confirma que não era um interruptor físico genuíno (esse
+  continuaria bloqueado logo em seguida). Só loga e tenta desbloquear;
+  nunca falha o script por si só, já que o `create_ap` reporta o erro
+  de qualquer forma se o desbloqueio não funcionar (ex.: bloqueio
+  físico genuíno de verdade, que nenhum comando resolve).
 - **`WIFI_CHANNEL`** aceita:
   - um número de canal fixo (validado como inteiro) — usado como está,
     sem retry nem fallback de banda: se `create_ap` rejeitar esse canal
@@ -80,6 +102,31 @@ Regras:
     (lista separada por vírgula/espaço); caso contrário os candidatos
     padrão são `1 6 11` (2.4GHz) ou `36 40 44 48 149 153 157 161`
     (5GHz).
+  - **Histórico persistente** (`hotspot_channel_history` no Postgres,
+    `services/worker/hotspot/history.sh`) influencia a ordem dos
+    candidatos muito mais que a pontuação de interferência ao vivo:
+    cada tentativa de `create_ap` num banda/canal grava sucesso (o log
+    mostrou `AP-ENABLED`, mesmo que o AP caia depois por outro motivo)
+    ou falha, por combinação (`WIFI_INTERFACE`, modo, banda, canal).
+    `rank_channels_for_band` soma `(falhas − sucessos) × 1000` à
+    pontuação de interferência de cada candidato antes de ordenar —
+    um canal que já falhou consistentemente (ex.: "adapter can not
+    transmit") vai sempre pro fim da fila nas próximas subidas, mesmo
+    que a varredura ao vivo o mostre como o menos congestionado agora;
+    interferência só desempata candidatos com o mesmo histórico
+    (incluindo nenhum ainda). "Modo" distingue `same-interface`
+    (Wi-Fi para Wi-Fi — histórico é só diagnóstico ali, já que o canal
+    é sempre travado pelo canal da estação, sem escolha real) de
+    `different-interface` (Ethernet para Wi-Fi/auto — histórico
+    realmente influencia a ordem). `resolve_wifi_band` usa a mesma
+    lógica num nível acima: se uma banda inteira tem histórico de
+    sucesso melhor que a banda preferida por capacidade de hardware
+    (5GHz), a automática escolhe a banda historicamente melhor direto,
+    evitando reaprender do zero (testando todos os candidatos de 5GHz
+    de novo) uma trava regulatória de firmware já conhecida. Histórico
+    nunca é uma dependência funcional — qualquer falha ao ler/gravar
+    no Postgres é ignorada em silêncio (só perde a otimização de
+    velocidade, não trava o hotspot).
 - **`WIFI_FREQ_BAND`** aceita `2.4`, `5` ou `auto` (padrão). Resolvida
   **antes** da seleção de canal, porque a lista de candidatos e a
   pontuação de interferência dependem da banda:
@@ -176,6 +223,16 @@ Regras:
   por tentativa) só pra repetir a mesma checagem — sem isso, o hotspot
   Wi-Fi-para-Wi-Fi podia demorar dezenas de segundos (ou falhar
   repetidamente) mesmo com o cliente Wi-Fi genuinamente estável.
+  **Essa paciência só se aplica quando `WIFI_INTERFACE` também é a
+  fonte de internet** (Wi-Fi para Wi-Fi de verdade) — em qualquer
+  outro modo (ex.: Ethernet para Wi-Fi), `sta_link_connected` faz uma
+  única leitura rápida e sem espera, porque a placa foi deliberadamente
+  desconectada/desgerenciada antes do hotspot subir e nunca vai
+  "reconectar" sozinha; aplicar a mesma paciência ali é inútil e
+  caro — `rank_channels_for_band`/`start_hotspot_auto` chamam
+  `try_create_ap` (que usa essa checagem) uma vez por canal candidato,
+  então 8s de espera à toa por candidato somava mais de um minuto de
+  atraso na subida do hotspot Ethernet-para-Wi-Fi.
   **Mesmo com essa paciência, se `sta_current_band_channel` ainda
   assim falhar** (associação genuinamente instável por mais tempo que
   isso), Wi-Fi para Wi-Fi **nunca** cai pro caminho antigo de
@@ -282,21 +339,30 @@ scripts tinham, só que dentro do container privilegiado em vez de
   2. O `worker`, bem em cima do `docker exec ... start`
      (`unmanageWifiInterfaceIfIdle`, `services/worker/controller/compose.go`),
      desgerencia `WIFI_INTERFACE` no NetworkManager **exceto** quando
-     `WIFI_INTERFACE == INTERNET_INTERFACE` e a placa já está associada
-     como cliente Wi-Fi agora (Wi-Fi para Wi-Fi de verdade, AP+STA
-     concorrente) — só nesse caso ela fica gerenciada de propósito,
-     para preservar essa associação. Qualquer outra combinação (ex.:
-     internet via Ethernet) sempre desgerencia a placa antes do hotspot
-     subir, mesmo que ela esteja transitoriamente associada a alguma
-     rede Wi-Fi do usuário sem relação com o hotspot — deixar o
-     NetworkManager "dono" dela nesse caso o faz competir pelo rádio
-     com o `hostapd` (escaneando/tentando reassociar a mesma placa
-     enquanto o AP tenta usá-la), derrubando o beacon. O container
-     `hotspot` delega ao `create_ap` a criação da interface AP virtual
-     (`ap0`) quando o adaptador suporta AP+STA. A fonte de internet
-     entregue ao `create_ap` é sempre o uplink virtual
-     `BINDNET_UPLINK_INTERFACE`, alimentado por regras Bindnet de
-     NAT/forward a partir da interface real configurada.
+     `WIFI_INTERFACE == INTERNET_INTERFACE` (Wi-Fi para Wi-Fi de
+     verdade, AP+STA concorrente) — nesse caso a placa fica sempre
+     gerenciada, **incondicionalmente**, sem checar se está associada
+     como cliente Wi-Fi agora. Essa checagem já existiu (só pulava o
+     desgerenciamento quando associada *no instante da checagem*) e foi
+     removida de propósito: é uma corrida real — pegar a placa
+     momentaneamente sem associação (ex.: o NetworkManager ainda no
+     meio da própria reconexão logo após um restart) desgerenciava/
+     desconectava mesmo assim, travando a placa desconectada **para
+     sempre** dali em diante, já que o NetworkManager é a única coisa
+     que a reconectaria sozinha e passa a estar desligado — confirmado
+     ao vivo (funcionava uma vez após reconexão manual, e voltava a
+     falhar sozinho no ciclo de restart seguinte, sempre pela mesma
+     causa). Qualquer outra combinação (ex.: internet via Ethernet)
+     sempre desgerencia a placa antes do hotspot subir, mesmo que ela
+     esteja transitoriamente associada a alguma rede Wi-Fi do usuário
+     sem relação com o hotspot — deixar o NetworkManager "dono" dela
+     nesse caso o faz competir pelo rádio com o `hostapd` (escaneando/
+     tentando reassociar a mesma placa enquanto o AP tenta usá-la),
+     derrubando o beacon. O container `hotspot` delega ao `create_ap` a
+     criação da interface AP virtual (`ap0`) quando o adaptador suporta
+     AP+STA. A fonte de internet entregue ao `create_ap` é sempre o
+     uplink virtual `BINDNET_UPLINK_INTERFACE`, alimentado por regras
+     Bindnet de NAT/forward a partir da interface real configurada.
 - `POST /api/hotspot/stop` desfaz exatamente o inverso, na ordem
   inversa:
   1. Para `hotspot` + `dns-provider` (`docker stop`, via `worker`) —

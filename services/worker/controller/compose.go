@@ -61,25 +61,34 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 }
 
 // unmanageWifiInterfaceIfIdle desgerencia a placa Wi-Fi fisica no
-// NetworkManager antes do hotspot subir. So preserva uma associacao
-// Wi-Fi cliente existente (nao desgerencia) quando WIFI_INTERFACE e
-// INTERNET_INTERFACE sao a MESMA placa (Wi-Fi para Wi-Fi de verdade,
-// AP+STA concorrente) - mesmo criterio que try_create_ap
-// (entrypoint.sh) usa para escolher --no-virt em vez de criar uma
-// interface AP virtual. Qualquer outra combinacao (ex.: internet via
-// Ethernet) nao tem motivo pra preservar essa associacao, mesmo que a
-// placa esteja transitoriamente conectada a alguma rede Wi-Fi do
-// usuario sem relacao com o hotspot: deixa-la gerenciada nesse caso
-// so faz o NetworkManager continuar escaneando/tentando (re)associar
-// essa mesma placa enquanto o hostapd tenta manter o AP nela,
-// derrubando o beacon ("Failed to set beacon parameters"/"key not
-// allowed", ver Dockerfile). Falha/ausencia de iface nunca bloqueia o
-// start.
+// NetworkManager antes do hotspot subir. Nunca desgerencia/desconecta
+// quando WIFI_INTERFACE e INTERNET_INTERFACE sao a MESMA placa (Wi-Fi
+// para Wi-Fi de verdade, AP+STA concorrente) - incondicional, sem
+// checar se ela esta associada agora: o NetworkManager e o unico que
+// mantem essa associacao viva nesse modo (o create_ap so cria a
+// interface virtual ap0 ao lado dela, nunca assume a fisica sozinho).
+// Checar "esta associada agora?" antes de decidir e uma corrida real -
+// confirmado ao vivo que pegar a placa momentaneamente sem associacao
+// (ex.: NM ainda no meio da propria reconexao apos um restart) fazia
+// desgerenciar/desconectar mesmo assim, travando a placa desconectada
+// PARA SEMPRE dali em diante: com "managed no", nada mais tenta
+// reconecta-la (o NetworkManager e a unica coisa que faria isso, e
+// esta desligado), entao toda tentativa seguinte do hotspot encontra a
+// mesma placa sem associacao, indefinidamente, exigindo reconexao
+// manual pra sair desse estado. Qualquer outra combinacao (ex.:
+// internet via Ethernet) nao tem motivo pra preservar essa associacao,
+// mesmo que a placa esteja transitoriamente conectada a alguma rede
+// Wi-Fi do usuario sem relacao com o hotspot: deixa-la gerenciada
+// nesse caso so faz o NetworkManager continuar escaneando/tentando
+// (re)associar essa mesma placa enquanto o hostapd tenta manter o AP
+// nela, derrubando o beacon ("Failed to set beacon parameters"/"key
+// not allowed", ver Dockerfile). Falha/ausencia de iface nunca bloqueia
+// o start.
 func unmanageWifiInterfaceIfIdle(wifiInterface, internetInterface string) {
 	if wifiInterface == "" {
 		return
 	}
-	if wifiInterface == internetInterface && interfaceAssociated(wifiInterface) {
+	if wifiInterface == internetInterface {
 		return
 	}
 	if err := unmanageWifiInterface(wifiInterface); err != nil {

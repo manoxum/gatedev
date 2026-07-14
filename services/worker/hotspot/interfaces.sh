@@ -230,7 +230,9 @@ apply_bindnet_uplink_rules() {
 
   REAL_INTERNET_INTERFACE="${iface}"
   INTERNET_INTERFACE="${iface}"
-  log "Fonte real de internet do hotspot: ${REAL_INTERNET_INTERFACE}; create_ap recebe uplink virtual estavel ${CREATE_AP_INTERNET_INTERFACE}."
+  local interface_display="${REAL_INTERNET_INTERFACE}"
+  [[ "${INTERNET_STRATEGY}" == "auto" ]] && interface_display="auto (${REAL_INTERNET_INTERFACE})"
+  log "Fonte real de internet do hotspot: ${interface_display}; create_ap recebe uplink virtual estavel ${CREATE_AP_INTERNET_INTERFACE}."
 }
 
 setup_bindnet_virtual_uplink() {

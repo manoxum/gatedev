@@ -16,7 +16,12 @@ interface LogsPanelProps {
 // (docker logs -f) e vai anexando ao painel, com auto-scroll.
 export function LogsPanel({ title, path, onClear }: LogsPanelProps) {
   const [lines, setLines] = useState("");
-  const [following, setFollowing] = useState(false);
+  // Comeca acompanhando ja: o componente so monta quando a aba/tela de
+  // logs correspondente e aberta (Radix TabsContent so monta a aba
+  // ativa), entao "entrar na aba" e "montar o LogsPanel" e a mesma
+  // coisa - nao faz sentido exigir um clique extra em "Acompanhar
+  // logs" toda vez.
+  const [following, setFollowing] = useState(true);
   const [clearing, setClearing] = useState(false);
   // Incrementado a cada "Limpar logs" bem sucedido so para forcar o
   // efeito abaixo a reabrir o stream (se estiver acompanhando) ja a

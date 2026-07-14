@@ -4,6 +4,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { HotspotWifiQr } from "@/components/hotspot/HotspotWifiQr";
+import {
+  HotspotInterfaceQuickSwitch,
+  type InterfaceQuickSwitchOption,
+} from "@/components/hotspot/HotspotInterfaceQuickSwitch";
 
 // Carregado sob demanda: puxa o ApexCharts (~170KB gzip), que so faz
 // sentido pagar em paginas de hotspot, nao no bundle principal
@@ -22,6 +26,24 @@ interface HotspotSummaryCardProps {
   onStop: () => void;
   onRecover: () => void;
   onEdit: () => void;
+  currentBand?: string;
+  currentChannel?: string;
+  currentInternetInterface?: string;
+  wifiInterfaceOptions: InterfaceQuickSwitchOption[];
+  internetInterfaceOptions: InterfaceQuickSwitchOption[];
+  onQuickSwitchInterface: (field: "WIFI_INTERFACE" | "INTERNET_INTERFACE", value: string) => void;
+  quickSwitchPending?: boolean;
+}
+
+// autoValue mostra "auto (valor real)" quando o campo esta configurado
+// como "auto" e ja existe um valor real resolvido pelo worker (vindo do
+// status do hotspot rodando); caso contrario mostra so o valor
+// configurado, sem inventar um "real" quando o hotspot esta parado.
+function autoValue(configured: string | undefined, resolved: string | undefined): string {
+  if (configured === "auto" && resolved) {
+    return `auto (${resolved})`;
+  }
+  return configured ?? "";
 }
 
 // Compacto de proposito (icone menor, menos padding, texto menor): o
@@ -53,6 +75,13 @@ export function HotspotSummaryCard({
   onStop,
   onRecover,
   onEdit,
+  currentBand,
+  currentChannel,
+  currentInternetInterface,
+  wifiInterfaceOptions,
+  internetInterfaceOptions,
+  onQuickSwitchInterface,
+  quickSwitchPending,
 }: HotspotSummaryCardProps) {
   const ssid = config.WIFI_SSID ?? "";
   const password = config.WIFI_PASSWORD ?? "";
@@ -95,11 +124,30 @@ export function HotspotSummaryCard({
         {ssid && password && <HotspotWifiQr ssid={ssid} password={password} />}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:w-auto lg:shrink-0">
           <ConfigItem icon={Wifi} label="SSID" value={ssid} />
-          <ConfigItem icon={Router} label="Interface Wi-Fi" value={config.WIFI_INTERFACE ?? ""} />
-          <ConfigItem icon={Globe} label="Interface de internet" value={config.INTERNET_INTERFACE ?? ""} />
+          <HotspotInterfaceQuickSwitch
+            icon={Router}
+            label="Interface Wi-Fi"
+            value={config.WIFI_INTERFACE ?? ""}
+            options={wifiInterfaceOptions}
+            onChange={(value) => onQuickSwitchInterface("WIFI_INTERFACE", value)}
+            disabled={quickSwitchPending}
+          />
+          <HotspotInterfaceQuickSwitch
+            icon={Globe}
+            label="Interface de internet"
+            value={config.INTERNET_INTERFACE ?? ""}
+            displayValue={autoValue(config.INTERNET_INTERFACE, currentInternetInterface)}
+            options={internetInterfaceOptions}
+            onChange={(value) => onQuickSwitchInterface("INTERNET_INTERFACE", value)}
+            disabled={quickSwitchPending}
+          />
           <ConfigItem icon={Flag} label="País" value={config.WIFI_COUNTRY ?? ""} />
-          <ConfigItem icon={Waves} label="Banda" value={config.WIFI_FREQ_BAND ?? ""} />
-          <ConfigItem icon={Hash} label="Canal" value={config.WIFI_CHANNEL ?? ""} />
+          <ConfigItem
+            icon={Waves}
+            label="Banda"
+            value={autoValue(config.WIFI_FREQ_BAND, currentBand ? `${currentBand}GHz` : undefined)}
+          />
+          <ConfigItem icon={Hash} label="Canal" value={autoValue(config.WIFI_CHANNEL, currentChannel)} />
         </div>
         <div className="flex min-w-0 flex-1 items-stretch">
           <Suspense fallback={<div className="h-full min-h-[140px] w-full animate-pulse rounded-xl bg-muted/30" />}>

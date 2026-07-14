@@ -40,6 +40,16 @@ services:
     restart: unless-stopped
     privileged: true
     network_mode: host
+    # force_stop_create_ap (entrypoint.sh) pode levar ate ~15s no pior
+    # caso (timeout -k 5 10 do "create_ap --stop" + escalonamento pra
+    # SIGKILL) antes de devolver a placa fisica - sem isso aqui, o
+    # Docker usa o padrao de 10s e manda SIGKILL no container inteiro
+    # antes dessa limpeza terminar (ex.: durante um "docker compose up
+    # --build" que recria o container com o hotspot ativo), deixando o
+    # driver iwlwifi num estado que ja disparou bloqueio de rfkill de
+    # verdade (rfkill list mostrando "Hard blocked: yes" em phy0) numa
+    # sessao real. 30s da folga confortavel acima do pior caso.
+    stop_grace_period: 30s
     env_file:
       - ${BINDNET_ENV_FILE:-.env.main}
     environment:

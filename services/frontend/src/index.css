@@ -61,6 +61,16 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* color-scheme (acima, em :root/.dark) so avisa o navegador sobre o
+     tema, mas o cromo do popup de <select> (fundo/scrollbar) continua
+     vindo do SO em vários navegadores/plataformas - fixando
+     background-color/color aqui em cima das <option> (suportado pelos
+     principais navegadores, ao contrário do resto do popup) evita o
+     texto claro do tema escuro caindo sobre fundo claro do SO. */
+  select option {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
 }
 
 @layer utilities {

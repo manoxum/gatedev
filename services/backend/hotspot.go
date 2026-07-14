@@ -156,6 +156,9 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 				if band != "" {
 					response["band"] = band
 				}
+				if internetInterface := parseHotspotInternetInterface(logs.String()); internetInterface != "" {
+					response["internetInterface"] = internetInterface
+				}
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")

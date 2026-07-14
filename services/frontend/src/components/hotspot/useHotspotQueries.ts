@@ -16,6 +16,7 @@ export interface HotspotStatus {
   status: string;
   channel?: string;
   band?: string;
+  internetInterface?: string;
 }
 export interface NetworkInterface {
   name: string;

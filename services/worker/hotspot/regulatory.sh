@@ -22,6 +22,46 @@ self_managed_regulatory_country() {
   ' <<< "${output}" | tr -d ':'
 }
 
+# ensure_wifi_radio_unblocked confere se o radio Wi-Fi esta bloqueado
+# via rfkill (soft ou hard) e tenta desbloquear via software antes de
+# qualquer tentativa de canal - um radio bloqueado rejeita TODOS os
+# canais/bandas igualmente com erros genericos do driver ("RTNETLINK
+# answers: No error information"), indistinguivel de fora de uma trava
+# regulatoria ou de canal especifico. Confirmado ao vivo: um "docker
+# compose up --build" que recria o container hotspot com o create_ap
+# ativo (interrompendo a limpeza normal no meio - ver stop_grace_period
+# em docker-compose.services.yml) deixou o driver iwlwifi reportando
+# bloqueio "hard" via rfkill, e um "rfkill unblock" comum (sem
+# privilegio extra) resolveu de verdade - confirma que nao era um
+# interruptor fisico genuino (esse continuaria bloqueado logo em
+# seguida, ja que rfkill unblock nunca desfaz um bloqueio fisico real).
+# So loga e tenta desbloquear - nunca falha o script por si so, ja que
+# create_ap vai reportar o erro de qualquer forma se o desbloqueio nao
+# funcionar (ex.: bloqueio fisico genuino).
+ensure_wifi_radio_unblocked() {
+  command -v rfkill >/dev/null 2>&1 || return 0
+
+  # "|| true" no grep e necessario: com set -e/pipefail (topo do
+  # entrypoint.sh), radio saudavel = grep sem match = exit 1 = pipeline
+  # inteira "falha" = set -e mata o script inteiro aqui, silenciosamente,
+  # sem nenhuma mensagem de erro (confirmado ao vivo: o hotspot parava
+  # de fazer qualquer coisa logo apos "Configuracao operacional...",
+  # nunca chegando nem no diagnostico regulatorio nem em erro nenhum).
+  local blocked
+  blocked="$(rfkill list wifi 2>/dev/null | grep -Ei 'blocked: yes' || true)"
+  [[ -n "${blocked}" ]] || return 0
+
+  log "AVISO: radio Wi-Fi esta bloqueado via rfkill (soft ou hard) - todos os canais/bandas falhariam igualmente com erros genericos do driver. Tentando desbloquear via software."
+  rfkill unblock wifi >/dev/null 2>&1 || true
+  sleep 1
+
+  if rfkill list wifi 2>/dev/null | grep -qEi 'blocked: yes'; then
+    log "ERRO: nao foi possivel desbloquear o radio Wi-Fi via software - se houver uma tecla/interruptor fisico de Wi-Fi/modo aviao nesta maquina, verifique se nao esta acionado (rfkill unblock nao desfaz um bloqueio fisico genuino)."
+  else
+    log "Radio Wi-Fi desbloqueado com sucesso via rfkill."
+  fi
+}
+
 # log_wifi_regulatory_info roda "iw reg get" e loga a saida linha a linha,
 # destacando quando um phy self-managed esta preso num pais diferente
 # de WIFI_COUNTRY - a causa mais comum de "adapter can not transmit" em

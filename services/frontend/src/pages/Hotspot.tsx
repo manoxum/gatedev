@@ -8,6 +8,7 @@ import { HotspotBlocklistCard } from "@/components/hotspot/HotspotBlocklistCard"
 import { HotspotClientsCard } from "@/components/hotspot/HotspotClientsCard";
 import { HotspotKnownDevicesCard } from "@/components/hotspot/HotspotKnownDevicesCard";
 import { HotspotSummaryCard } from "@/components/hotspot/HotspotSummaryCard";
+import { interfaceLabel } from "@/components/hotspot/HotspotInterfacesTab";
 import { GlobalLimitsCard } from "@/components/hotspot/GlobalLimitsCard";
 import { HotspotProfilesCard } from "@/components/hotspot/HotspotProfilesCard";
 import { HotspotVouchersCard } from "@/components/hotspot/HotspotVouchersCard";
@@ -36,6 +37,20 @@ export function HotspotPage() {
 
   const wifiInterfaces = interfaces.data?.filter((i) => i.type === "wifi") ?? [];
   const networkInterfaces = interfaces.data ?? [];
+  const wifiInterfaceOptions = wifiInterfaces.map((i) => ({ value: i.name, label: `${i.name} (${i.state})` }));
+  const internetInterfaceOptions = [
+    { value: "auto", label: "Automática (melhor disponível)" },
+    ...networkInterfaces.map((i) => ({ value: i.name, label: interfaceLabel(i) })),
+  ];
+
+  // Troca rapida de interface pelo card de resumo (sem abrir o dialog
+  // inteiro de "Alterar configuracao") - reusa o mesmo salvar+aplicar
+  // do formulario completo; a escolha do usuario no dropdown ja e a
+  // confirmacao, igual clicar em "Salvar e aplicar" no dialog.
+  const handleQuickSwitchInterface = (field: "WIFI_INTERFACE" | "INTERNET_INTERFACE", value: string) => {
+    if (!config.data) return;
+    saveAndApply.mutate({ ...config.data, [field]: value } as ConfigForm);
+  };
 
   // Preenche o formulario assim que config+interfaces carregarem. Quando
   // ainda nao configurado (instalacao nova), sugere valores inteligentes
@@ -87,6 +102,13 @@ export function HotspotPage() {
       <HotspotSummaryCard
         config={config.data ?? {}}
         running={!!status.data?.running}
+        currentBand={status.data?.band}
+        currentChannel={status.data?.channel}
+        currentInternetInterface={status.data?.internetInterface}
+        wifiInterfaceOptions={wifiInterfaceOptions}
+        internetInterfaceOptions={internetInterfaceOptions}
+        onQuickSwitchInterface={handleQuickSwitchInterface}
+        quickSwitchPending={saveAndApply.isPending}
         startPending={start.isPending}
         stopPending={stop.isPending}
         recoverPending={recoverWifi.isPending}
