@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatSpeedNow } from "@/components/hotspot/hotspot-limits-types";
 import { useClientsStats } from "@/components/hotspot/useHotspotQueries";
 import { DeviceIdentifyModal } from "@/components/hotspot/DeviceIdentifyModal";
+import { WifiSignalIndicator } from "@/components/hotspot/WifiSignalIndicator";
 import type { HotspotBlockMode } from "@/components/hotspot/useHotspotMutations";
 
 // "manual" (bloqueio explicito do admin), "credit" (credito esgotado)
@@ -29,25 +30,35 @@ export interface HotspotClient {
   blockReason?: HotspotBlockReason;
   profileId?: string;
   profileName?: string;
+  signalDbm?: number;
 }
 
 // blockStatusLabel traduz blocked/blockReason num rotulo+variante de
-// Badge - reusado pela listagem (HotspotClientsCard) e pelo resumo do
-// dispositivo (DeviceOverviewTab.tsx), pra nunca os dois textos
-// divergirem.
-export function blockStatusLabel(client: Pick<HotspotClient, "blocked" | "blockReason">): {
+// Badge - reusado pela listagem (HotspotClientsCard), pelo resumo do
+// dispositivo (DeviceOverviewTab.tsx) e pelo cabecalho da pagina de
+// detalhe (HotspotDeviceDetail.tsx), pra nunca os textos divergirem.
+// "online" e opcional (default true) porque em HotspotClientsCard todo
+// cliente da lista ja esta, por definicao, conectado agora - so a
+// pagina de detalhe/HotspotKnownDevicesCard precisam distinguir
+// online de offline explicitamente (dispositivo pode estar bloqueado
+// E offline ao mesmo tempo; bloqueio sempre prevalece na exibicao,
+// segue a mesma prioridade de deviceBlockReason no backend).
+export function blockStatusLabel(
+  client: Pick<HotspotClient, "blocked" | "blockReason">,
+  online = true,
+): {
   label: string;
-  variant: "success" | "destructive";
+  variant: "success" | "destructive" | "outline";
 } {
-  if (!client.blocked) return { label: "Ativo", variant: "success" };
   switch (client.blockReason) {
     case "credit":
       return { label: "Sem crédito", variant: "destructive" };
     case "quota":
       return { label: "Cota esgotada", variant: "destructive" };
     default:
-      return { label: "Bloqueado", variant: "destructive" };
+      if (client.blocked) return { label: "Bloqueado", variant: "destructive" };
   }
+  return online ? { label: "Online", variant: "success" } : { label: "Offline", variant: "outline" };
 }
 
 interface HotspotClientsCardProps {
@@ -86,6 +97,7 @@ export function HotspotClientsCard({
               <TableHead>Endereço</TableHead>
               <TableHead>Identificação</TableHead>
               <TableHead>Perfil</TableHead>
+              <TableHead>Sinal</TableHead>
               <TableHead>Velocidade</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Ações</TableHead>
@@ -119,6 +131,9 @@ export function HotspotClientsCard({
                 </TableCell>
                 <TableCell>
                   <span className="text-sm">{client.profileName || "Padrão"}</span>
+                </TableCell>
+                <TableCell>
+                  <WifiSignalIndicator dbm={client.signalDbm} />
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
@@ -191,7 +206,7 @@ export function HotspotClientsCard({
             })}
             {running && clients.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   Nenhum cliente conectado.
                 </TableCell>
               </TableRow>

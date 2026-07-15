@@ -2,17 +2,37 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { SpeedGauge } from "@/components/ui/speed-gauge";
 import { HotspotQuotaPeriodBars } from "@/components/hotspot/HotspotQuotaPeriodBars";
-import { LIMIT_TYPE_LABELS, rateToBps, toBitsPerSecond, type ByteNature } from "@/components/hotspot/hotspot-limits-types";
-import { useDeviceLimits, useDeviceQuotaPeriods, useDeviceStats } from "@/components/hotspot/useHotspotQueries";
+import {
+  LIMIT_TYPE_LABELS,
+  rateToBps,
+  toBitsPerSecond,
+  type ByteNature,
+  type RateUnit,
+} from "@/components/hotspot/hotspot-limits-types";
+import { useDeviceLimits, useDeviceQuotaPeriods, useDeviceSpeedHistory, useDeviceStats } from "@/components/hotspot/useHotspotQueries";
+
+const GAUGE_MAX_WINDOW_MINUTES = 1;
+
+// gaugeMaxBps decide o teto do velocimetro numa unica regra: taxa
+// EFETIVA configurada (direta no dispositivo ou herdada do perfil,
+// useDeviceLimits ja resolve isso) quando existir; sem taxa nenhuma,
+// cai na MESMA estrategia do painel global (HotspotGlobalSpeedPanel.tsx) -
+// 2x a media do ultimo minuto, undefined (autoescala generico do
+// SpeedGauge) so enquanto ainda nao ha amostra nenhuma dessa janela.
+function gaugeMaxBps(rateValue: number | null, rateUnit: RateUnit, avgBps: number | undefined): number | undefined {
+  if (rateValue) return rateToBps(rateValue, rateUnit) ?? undefined;
+  return avgBps !== undefined ? toBitsPerSecond(avgBps) * 2 : undefined;
+}
 
 // Velocimetro "agora" do dispositivo (poll de 2.5s, useDeviceStats),
 // ao lado do grafico de tendencia (DeviceSpeedChart.tsx) na aba
 // "Visao geral" - card separado de proposito (nao embutido no
 // cabecalho do grafico) para os dois ficarem lado a lado em telas
-// largas. Teto do arco usa o limite configurado do dispositivo, quando
-// houver; unitNature vem do mesmo estado do grafico ao lado (levantado
-// pro pai, HotspotDeviceDetail.tsx) pra nao mostrar bits aqui e bytes
-// la.
+// largas. Teto do arco: ver gaugeMaxBps acima (taxa efetiva do
+// dispositivo/perfil quando houver, senao a mesma estrategia do
+// velocimetro global); unitNature vem do mesmo estado do grafico ao
+// lado (levantado pro pai, HotspotDeviceDetail.tsx) pra nao mostrar
+// bits aqui e bytes la.
 //
 // O rodape com perfil/limite/cota (abaixo dos velocimetros) nao e so
 // enchimento: os dois velocimetros sozinhos deixavam uma sobra de
@@ -32,20 +52,40 @@ export function DeviceSpeedGaugeCard({ mac, unitNature }: { mac: string; unitNat
   const isQuota = limits.data?.limitType === "quota";
   const quotaPeriods = useDeviceQuotaPeriods(isQuota ? mac : "");
 
+  const needsAutoScale = !!limits.data && (!limits.data.downloadRateValue || !limits.data.uploadRateValue);
+  const gaugeMaxHistory = useDeviceSpeedHistory(needsAutoScale ? mac : "", GAUGE_MAX_WINDOW_MINUTES);
+  const gaugeMaxSamples = gaugeMaxHistory.data ?? [];
+  const avgDownloadBps =
+    gaugeMaxSamples.length > 0
+      ? gaugeMaxSamples.reduce((sum, s) => sum + s.downloadBps, 0) / gaugeMaxSamples.length
+      : undefined;
+  const avgUploadBps =
+    gaugeMaxSamples.length > 0
+      ? gaugeMaxSamples.reduce((sum, s) => sum + s.uploadBps, 0) / gaugeMaxSamples.length
+      : undefined;
+
   return (
     <Card className="flex h-full flex-col lg:w-auto lg:shrink-0">
       <CardContent className="flex flex-1 flex-col justify-center gap-4 pt-6">
         <div className="flex items-center justify-center gap-4">
           <SpeedGauge
             valueBps={toBitsPerSecond(stats.data?.downloadBps ?? 0)}
-            maxBps={limits.data ? rateToBps(limits.data.downloadRateValue, limits.data.downloadRateUnit) : null}
+            maxBps={
+              limits.data
+                ? gaugeMaxBps(limits.data.downloadRateValue, limits.data.downloadRateUnit, avgDownloadBps)
+                : undefined
+            }
             label="Download"
             size="lg"
             unitNature={unitNature}
           />
           <SpeedGauge
             valueBps={toBitsPerSecond(stats.data?.uploadBps ?? 0)}
-            maxBps={limits.data ? rateToBps(limits.data.uploadRateValue, limits.data.uploadRateUnit) : null}
+            maxBps={
+              limits.data
+                ? gaugeMaxBps(limits.data.uploadRateValue, limits.data.uploadRateUnit, avgUploadBps)
+                : undefined
+            }
             label="Upload"
             size="lg"
             unitNature={unitNature}

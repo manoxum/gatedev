@@ -13,9 +13,10 @@ import (
 )
 
 type workerHotspotClient struct {
-	MAC      string `json:"mac"`
-	IP       string `json:"ip"`
-	Hostname string `json:"hostname"`
+	MAC       string `json:"mac"`
+	IP        string `json:"ip"`
+	Hostname  string `json:"hostname"`
+	SignalDBM *int   `json:"signalDbm,omitempty"`
 }
 
 type hotspotClientResponse struct {
@@ -31,6 +32,7 @@ type hotspotClientResponse struct {
 	BlockReason blockReason `json:"blockReason,omitempty"`
 	ProfileID   string      `json:"profileId,omitempty"`
 	ProfileName string      `json:"profileName,omitempty"`
+	SignalDBM   *int        `json:"signalDbm,omitempty"`
 }
 
 type hotspotDeviceInfo struct {
@@ -110,6 +112,7 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerClien
 		enriched := infoToClientFields(mac, info[mac], deviceBlockReason(mac, blocked, blockedByCredit, blockedByQuota))
 		enriched.IP = client.IP
 		enriched.Hostname = client.Hostname
+		enriched.SignalDBM = client.SignalDBM
 		if ref, found := profiles[mac]; found {
 			enriched.ProfileID = ref.ID
 			enriched.ProfileName = ref.Name

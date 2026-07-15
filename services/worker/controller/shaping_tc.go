@@ -94,8 +94,9 @@ func deviceClassID(fwmark int) string {
 // classifica pacotes marcados com esse fwmark nela.
 func ensureDeviceClass(iface string, fwmark, rateValue int, rateUnitValue string) error {
 	classID := deviceClassID(fwmark)
+	guaranteedValue, guaranteedUnit := guaranteedRate(rateValue, rateUnitValue)
 	if err := runTC("class", "replace", "dev", iface, "parent", "1:1", "classid", classID,
-		"htb", "rate", rate(minGuaranteedMbps, rateUnitMbit), "ceil", rate(rateValue, rateUnitValue)); err != nil {
+		"htb", "rate", rate(guaranteedValue, guaranteedUnit), "ceil", rate(rateValue, rateUnitValue)); err != nil {
 		return fmt.Errorf("classe %s em %s: %w", classID, iface, err)
 	}
 	if err := runTC("filter", "replace", "dev", iface, "parent", "1:", "protocol", "ip", "pref", "1",
@@ -103,6 +104,43 @@ func ensureDeviceClass(iface string, fwmark, rateValue int, rateUnitValue string
 		return fmt.Errorf("filtro fwmark %d em %s: %w", fwmark, iface, err)
 	}
 	return nil
+}
+
+// guaranteedRate devolve o "rate" (piso garantido) da classe HTB
+// dedicada de um dispositivo: minGuaranteedMbps, exceto quando o teto
+// (ceil) configurado pelo admin e menor que isso - HTB exige rate <=
+// ceil na mesma classe (confirmado pela doc do tc), entao nesses
+// casos (qualquer limite abaixo de 1 Mbit/s, ex.: os 25 kbyte/s de um
+// perfil "convidado") o piso garantido vira o proprio teto, sem
+// inflar a garantia acima do que o admin permitiu.
+func guaranteedRate(ceilValue int, ceilUnit string) (int, string) {
+	if bitsPerSecond(ceilValue, ceilUnit) < bitsPerSecond(minGuaranteedMbps, rateUnitMbit) {
+		return ceilValue, ceilUnit
+	}
+	return minGuaranteedMbps, rateUnitMbit
+}
+
+// bitsPerSecond converte um valor+unidade da API (mesmas unidades de
+// tcRateSuffix) pra bits/s, usando prefixo decimal (SI) igual ao tc -
+// so serve pra comparar taxas de unidades diferentes, nunca e passado
+// direto pro tc (rate/tcRateSuffix continuam usando o valor+unidade
+// originais).
+func bitsPerSecond(value int, unit string) int64 {
+	v := int64(value)
+	switch unit {
+	case "kbit":
+		return v * 1_000
+	case "gbit":
+		return v * 1_000_000_000
+	case "kbyte":
+		return v * 1_000 * 8
+	case "mbyte":
+		return v * 1_000_000 * 8
+	case "gbyte":
+		return v * 1_000_000_000 * 8
+	default: // "mbit" e qualquer valor vazio/desconhecido (mesmo default de tcRateSuffix)
+		return v * 1_000_000
+	}
 }
 
 // removeDeviceClass remove o filtro e a classe dedicada de um

@@ -13,7 +13,7 @@ import { DeviceMovementsCard } from "@/components/hotspot/device-detail/DeviceMo
 import { DeviceSpeedGaugeCard } from "@/components/hotspot/device-detail/DeviceSpeedGaugeCard";
 import { SPEED_CHART_DEFAULT_WINDOW_MINUTES } from "@/components/hotspot/device-detail/speed-chart-windows";
 import { usePageHeader } from "@/hooks/usePageHeader";
-import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
+import { blockStatusLabel, type HotspotClient } from "@/components/hotspot/HotspotClientsCard";
 import type { ByteNature } from "@/components/hotspot/hotspot-limits-types";
 
 // Carregado sob demanda: puxa o ApexCharts (~170KB gzip), que so faz
@@ -31,7 +31,6 @@ const DeviceSpeedChart = lazy(() =>
 // encontrado".
 function knownDeviceAsClient(
   known: NonNullable<ReturnType<typeof useHotspotQueries>["knownDevices"]["data"]>[number],
-  blocked: boolean,
 ): HotspotClient {
   return {
     mac: known.mac,
@@ -41,7 +40,8 @@ function knownDeviceAsClient(
     deviceName: known.deviceName,
     osName: known.osName,
     alias: known.alias,
-    blocked,
+    blocked: known.blocked,
+    blockReason: known.blockReason,
   };
 }
 
@@ -55,11 +55,11 @@ export function HotspotDeviceDetailPage() {
   const [windowMinutes, setWindowMinutes] = useState(SPEED_CHART_DEFAULT_WINDOW_MINUTES);
   const [unitNature, setUnitNature] = useState<ByteNature>("bit");
 
-  const { clients, knownDevices, blocklist } = useHotspotQueries();
+  const { clients, knownDevices } = useHotspotQueries();
   const liveClient = clients.data?.find((candidate) => candidate.mac === mac);
   const knownDevice = knownDevices.data?.find((candidate) => candidate.mac === mac);
-  const blocked = blocklist.data?.some((device) => device.macAddress === mac) ?? false;
-  const client = liveClient ?? (knownDevice ? knownDeviceAsClient(knownDevice, blocked) : undefined);
+  const client = liveClient ?? (knownDevice ? knownDeviceAsClient(knownDevice) : undefined);
+  const online = !!liveClient;
   const loading = clients.isLoading || knownDevices.isLoading;
 
   usePageHeader({ title: client?.alias || client?.deviceName || client?.vendor || mac, description: client?.ip });
@@ -92,7 +92,10 @@ export function HotspotDeviceDetailPage() {
             <h1 className="text-2xl font-semibold">{client.alias || client.deviceName || client.vendor || "Dispositivo"}</h1>
             <p className="font-mono text-sm text-muted-foreground">{client.mac}</p>
           </div>
-          {!liveClient && <Badge variant="outline">desconectado</Badge>}
+          {(() => {
+            const status = blockStatusLabel(client, online);
+            return <Badge variant={status.variant}>{status.label}</Badge>;
+          })()}
         </div>
       </div>
 
@@ -126,7 +129,7 @@ export function HotspotDeviceDetailPage() {
             </div>
             <DeviceSpeedGaugeCard mac={client.mac} unitNature={unitNature} />
           </div>
-          <DeviceOverviewTab client={client} />
+          <DeviceOverviewTab client={client} online={online} />
         </TabsContent>
         <TabsContent value="limits">
           <DeviceLimitsTab mac={client.mac} />

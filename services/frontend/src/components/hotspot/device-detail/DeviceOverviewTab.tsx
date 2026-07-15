@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useUpdateDeviceIdentity } from "@/components/hotspot/useHotspotMutations";
 import { DeviceProfileSelect } from "@/components/hotspot/device-detail/DeviceProfileSelect";
 import { blockStatusLabel, type HotspotClient } from "@/components/hotspot/HotspotClientsCard";
+import { WifiSignalIndicator } from "@/components/hotspot/WifiSignalIndicator";
 
 function OverviewItem({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
   return (
@@ -79,7 +80,7 @@ function AliasItem({ mac, alias }: { mac: string; alias?: string }) {
   );
 }
 
-export function DeviceOverviewTab({ client }: { client: HotspotClient }) {
+export function DeviceOverviewTab({ client, online }: { client: HotspotClient; online: boolean }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <OverviewItem icon={Wifi} label="Endereço IP" value={client.ip || "desconhecido"} />
@@ -89,7 +90,8 @@ export function DeviceOverviewTab({ client }: { client: HotspotClient }) {
         label="Dispositivo"
         value={client.deviceName || client.vendor || "sem identificação"}
       />
-      <OverviewItem icon={Ban} label="Status" value={blockStatusLabel(client).label} />
+      <OverviewItem icon={Ban} label="Status" value={blockStatusLabel(client, online).label} />
+      <WifiSignalIndicator dbm={client.signalDbm} size="lg" />
       <AliasItem mac={client.mac} alias={client.alias} />
       <DeviceProfileSelect mac={client.mac} profileId={client.profileId} />
     </div>

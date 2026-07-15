@@ -88,9 +88,35 @@ func getOrCreateDeviceFwmark(db *sql.DB, mac string) (int, error) {
 	return traffic.Fwmark, nil
 }
 
+// ensureDeviceTrafficRow le a linha existente do dispositivo e so cai
+// pro INSERT quando ela realmente nao existe ainda - nunca usa
+// "INSERT ... ON CONFLICT DO UPDATE/DO NOTHING" aqui, porque o
+// Postgres avalia o DEFAULT da coluna fwmark (nextval da sequence,
+// ver hotspot_device_fwmark_seq) ao montar a linha candidata ANTES de
+// checar o conflito - ou seja, mesmo um upsert que so atualiza (ou um
+// "DO NOTHING") consome e descarta um valor da sequence a cada
+// chamada. Essa funcao roda a cada 1s por dispositivo conectado (ver
+// reconcileDeviceUsage) e a cada 15s no loop de reconciliacao, entao
+// o desperdicio inflava o fwmark rapido o bastante pra estourar os 16
+// bits que o classid HTB do tc aceita (ver deviceClassID em
+// services/worker/controller/shaping_tc.go), quebrando a classe HTB
+// dedicada (e o limite de banda) de qualquer dispositivo visto depois
+// disso. Fazendo o SELECT primeiro, o INSERT (que ainda tem o
+// ON CONFLICT DO UPDATE como rede de seguranca pra corrida entre
+// goroutines) so roda uma vez por MAC genuinamente novo.
 func ensureDeviceTrafficRow(db *sql.DB, mac string) (hotspotDeviceTraffic, error) {
 	var t hotspotDeviceTraffic
 	err := db.QueryRow(`
+		SELECT mac_address, fwmark, last_download_counter, last_upload_counter
+		FROM hotspot_device_traffic WHERE mac_address = $1
+	`, mac).Scan(&t.MACAddress, &t.Fwmark, &t.LastDownloadCounter, &t.LastUploadCounter)
+	if err == nil {
+		return t, nil
+	}
+	if err != sql.ErrNoRows {
+		return t, err
+	}
+	err = db.QueryRow(`
 		INSERT INTO hotspot_device_traffic (mac_address)
 		VALUES ($1)
 		ON CONFLICT (mac_address) DO UPDATE SET mac_address = EXCLUDED.mac_address

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { HotspotBlockedDevice } from "@/components/hotspot/HotspotBlocklistCard";
-import type { HotspotClient } from "@/components/hotspot/HotspotClientsCard";
+import type { HotspotBlockReason, HotspotClient } from "@/components/hotspot/HotspotClientsCard";
 import type {
   HotspotGlobalLimits,
   HotspotDeviceLimitsResponse,
@@ -34,6 +34,8 @@ export interface HotspotKnownDevice {
   firstSeenAt?: string;
   lastSeenAt?: string;
   connected: boolean;
+  blocked?: boolean;
+  blockReason?: HotspotBlockReason;
 }
 
 export function useHotspotQueries() {
