@@ -24,6 +24,8 @@ interface HotspotConfigFormProps {
   savePending: boolean;
   showPassword: boolean;
   onToggleShowPassword: () => void;
+  wifiOpen: boolean;
+  onWifiOpenChange: (open: boolean) => void;
   wifiInterfaces: NetworkInterface[];
   networkInterfaces: NetworkInterface[];
   // false esconde o botão Salvar e aplicar - usado pelo assistente de
@@ -43,6 +45,8 @@ export function HotspotConfigForm({
   savePending,
   showPassword,
   onToggleShowPassword,
+  wifiOpen,
+  onWifiOpenChange,
   wifiInterfaces,
   networkInterfaces,
   showActions = true,
@@ -63,6 +67,8 @@ export function HotspotConfigForm({
           errors={errors}
           showPassword={showPassword}
           onToggleShowPassword={onToggleShowPassword}
+          wifiOpen={wifiOpen}
+          onWifiOpenChange={onWifiOpenChange}
         />
         <HotspotInterfacesTab
           register={register}

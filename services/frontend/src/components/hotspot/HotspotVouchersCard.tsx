@@ -24,7 +24,7 @@ export function HotspotVouchersCard() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle>Vouchers (cartões de recarga)</CardTitle>
         <Button size="sm" onClick={() => setIssuing(true)}>
           <Plus className="h-4 w-4" />
@@ -36,11 +36,11 @@ export function HotspotVouchersCard() {
           <TableHeader>
             <TableRow>
               <TableHead>Lote</TableHead>
-              <TableHead>Valor por voucher</TableHead>
-              <TableHead>Quantidade</TableHead>
+              <TableHead className="hidden sm:table-cell">Valor por voucher</TableHead>
+              <TableHead className="hidden sm:table-cell">Quantidade</TableHead>
               <TableHead>Situação</TableHead>
-              <TableHead>Nota</TableHead>
-              <TableHead>Emitido em</TableHead>
+              <TableHead className="hidden md:table-cell">Nota</TableHead>
+              <TableHead className="hidden md:table-cell">Emitido em</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -51,8 +51,10 @@ export function HotspotVouchersCard() {
                 onClick={() => navigate(`/hotspot/vouchers/batches/${batch.id}`)}
               >
                 <TableCell className="font-mono text-xs">{batch.id}</TableCell>
-                <TableCell className="text-sm">{formatQuotaValue(batch.amountBytes, batch.amountUnit)}</TableCell>
-                <TableCell className="text-sm">{batch.quantity}</TableCell>
+                <TableCell className="hidden text-sm sm:table-cell">
+                  {formatQuotaValue(batch.amountBytes, batch.amountUnit)}
+                </TableCell>
+                <TableCell className="hidden text-sm sm:table-cell">{batch.quantity}</TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-1">
                     <Badge variant="default">{batch.activeCount} ativo(s)</Badge>
@@ -60,8 +62,10 @@ export function HotspotVouchersCard() {
                     {batch.revokedCount > 0 && <Badge variant="outline">{batch.revokedCount} anulado(s)</Badge>}
                   </div>
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">{batch.note || "-"}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{new Date(batch.createdAt).toLocaleString()}</TableCell>
+                <TableCell className="hidden text-sm text-muted-foreground md:table-cell">{batch.note || "-"}</TableCell>
+                <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+                  {new Date(batch.createdAt).toLocaleString()}
+                </TableCell>
               </TableRow>
             ))}
             {batches.data?.length === 0 && (

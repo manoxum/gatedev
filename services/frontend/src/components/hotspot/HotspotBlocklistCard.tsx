@@ -34,9 +34,9 @@ export function HotspotBlocklistCard({ devices, unblockPendingMac, onUnblock }: 
           <TableHeader>
             <TableRow>
               <TableHead>MAC</TableHead>
-              <TableHead>Nota</TableHead>
+              <TableHead className="hidden sm:table-cell">Nota</TableHead>
               <TableHead>Modo</TableHead>
-              <TableHead>Bloqueado em</TableHead>
+              <TableHead className="hidden md:table-cell">Bloqueado em</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
@@ -44,23 +44,24 @@ export function HotspotBlocklistCard({ devices, unblockPendingMac, onUnblock }: 
             {devices.map((device) => (
               <TableRow key={device.macAddress}>
                 <TableCell className="font-mono text-xs">{device.macAddress}</TableCell>
-                <TableCell>{device.note || "sem nota"}</TableCell>
+                <TableCell className="hidden sm:table-cell">{device.note || "sem nota"}</TableCell>
                 <TableCell>
                   <Badge variant={device.mode === "traffic" ? "outline" : "destructive"}>
                     {MODE_LABELS[device.mode]}
                   </Badge>
                 </TableCell>
-                <TableCell>{new Date(device.blockedAt).toLocaleString()}</TableCell>
+                <TableCell className="hidden md:table-cell">{new Date(device.blockedAt).toLocaleString()}</TableCell>
                 <TableCell>
                   <div className="flex justify-end">
                     <Button
                       variant="secondary"
                       size="sm"
+                      aria-label="Desbloquear"
                       disabled={unblockPendingMac === device.macAddress}
                       onClick={() => onUnblock(device.macAddress)}
                     >
                       <Undo2 className="h-4 w-4" />
-                      Desbloquear
+                      <span className="hidden sm:inline">Desbloquear</span>
                     </Button>
                   </div>
                 </TableCell>

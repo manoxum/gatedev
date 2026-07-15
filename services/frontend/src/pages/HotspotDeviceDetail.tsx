@@ -13,6 +13,7 @@ import { DeviceMovementsCard } from "@/components/hotspot/device-detail/DeviceMo
 import { DeviceSpeedGaugeCard } from "@/components/hotspot/device-detail/DeviceSpeedGaugeCard";
 import { SPEED_CHART_DEFAULT_WINDOW_MINUTES } from "@/components/hotspot/device-detail/speed-chart-windows";
 import { usePageHeader } from "@/hooks/usePageHeader";
+import { useUrlTab } from "@/hooks/useUrlTab";
 import { blockStatusLabel, type HotspotClient } from "@/components/hotspot/HotspotClientsCard";
 import type { ByteNature } from "@/components/hotspot/hotspot-limits-types";
 
@@ -54,6 +55,7 @@ export function HotspotDeviceDetailPage() {
   // valor na mesma unidade escolhida no grafico.
   const [windowMinutes, setWindowMinutes] = useState(SPEED_CHART_DEFAULT_WINDOW_MINUTES);
   const [unitNature, setUnitNature] = useState<ByteNature>("bit");
+  const [tab, setTab] = useUrlTab("overview");
 
   const { clients, knownDevices } = useHotspotQueries();
   const liveClient = clients.data?.find((candidate) => candidate.mac === mac);
@@ -99,8 +101,8 @@ export function HotspotDeviceDetailPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview">
-        <TabsList>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="grid h-auto w-full grid-cols-3 sm:inline-grid sm:w-auto">
           <TabsTrigger value="overview">
             <LayoutGrid className="h-4 w-4" />
             Visão geral

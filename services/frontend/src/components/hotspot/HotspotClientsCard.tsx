@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Ban, ScanSearch, Settings2, Undo2, WifiOff } from "lucide-react";
+import { Ban, ScanSearch, Undo2, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,9 +96,9 @@ export function HotspotClientsCard({
               <TableHead>MAC</TableHead>
               <TableHead>Endereço</TableHead>
               <TableHead>Identificação</TableHead>
-              <TableHead>Perfil</TableHead>
-              <TableHead>Sinal</TableHead>
-              <TableHead>Velocidade</TableHead>
+              <TableHead className="hidden md:table-cell">Perfil</TableHead>
+              <TableHead className="hidden md:table-cell">Sinal</TableHead>
+              <TableHead className="hidden md:table-cell">Velocidade</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
@@ -107,7 +107,11 @@ export function HotspotClientsCard({
             {clients.map((client) => {
               const clientStats = statsByMac.get(client.mac);
               return (
-              <TableRow key={client.mac}>
+              <TableRow
+                key={client.mac}
+                className="cursor-pointer"
+                onClick={() => navigate(`/hotspot/devices/${encodeURIComponent(client.mac)}`)}
+              >
                 <TableCell className="font-mono text-xs">{client.mac}</TableCell>
                 <TableCell>
                   <div className="space-y-1">
@@ -129,13 +133,13 @@ export function HotspotClientsCard({
                     <span className="text-sm text-muted-foreground">Sem identificação</span>
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden md:table-cell">
                   <span className="text-sm">{client.profileName || "Padrão"}</span>
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden md:table-cell">
                   <WifiSignalIndicator dbm={client.signalDbm} />
                 </TableCell>
-                <TableCell>
+                <TableCell className="hidden md:table-cell">
                   <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <span className="h-1.5 w-1.5 rounded-full bg-primary" />
@@ -153,49 +157,49 @@ export function HotspotClientsCard({
                     return <Badge variant={status.variant}>{status.label}</Badge>;
                   })()}
                 </TableCell>
-                <TableCell>
-                  <div className="flex justify-end gap-2">
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <div className="flex flex-wrap justify-end gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate(`/hotspot/devices/${encodeURIComponent(client.mac)}`)}
+                      aria-label="Identificar"
+                      onClick={() => setIdentifyMac(client.mac)}
                     >
-                      <Settings2 className="h-4 w-4" />
-                      Ver detalhes
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={() => setIdentifyMac(client.mac)}>
                       <ScanSearch className="h-4 w-4" />
-                      Identificar
+                      <span className="hidden sm:inline">Identificar</span>
                     </Button>
                     {client.blocked ? (
                       <Button
                         variant="secondary"
                         size="sm"
+                        aria-label="Desbloquear"
                         disabled={unblockPendingMac === client.mac}
                         onClick={() => onUnblock(client.mac)}
                       >
                         <Undo2 className="h-4 w-4" />
-                        Desbloquear
+                        <span className="hidden sm:inline">Desbloquear</span>
                       </Button>
                     ) : (
                       <>
                         <Button
                           variant="outline"
                           size="sm"
+                          aria-label="Cortar tráfego"
                           disabled={blockPendingMac === client.mac}
                           onClick={() => onBlock(client.mac, "traffic")}
                         >
                           <WifiOff className="h-4 w-4" />
-                          Cortar tráfego
+                          <span className="hidden sm:inline">Cortar tráfego</span>
                         </Button>
                         <Button
                           variant="destructive"
                           size="sm"
+                          aria-label="Bloquear"
                           disabled={blockPendingMac === client.mac}
                           onClick={() => onBlock(client.mac, "deauth")}
                         >
                           <Ban className="h-4 w-4" />
-                          Bloquear
+                          <span className="hidden sm:inline">Bloquear</span>
                         </Button>
                       </>
                     )}

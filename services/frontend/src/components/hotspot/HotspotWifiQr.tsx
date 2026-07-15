@@ -5,10 +5,17 @@ import { Eye, KeyRound, Wifi } from "lucide-react";
 interface HotspotWifiQrProps {
   ssid: string;
   password: string;
+  open: boolean;
 }
 
-function wifiQrValue(ssid: string, password: string) {
+// Formato padrao de QR Wi-Fi (lido por Android/iOS): "nopass" pula o
+// campo de senha inteiro - diferente de WPA com senha vazia, que a
+// maioria dos leitores rejeita ou trata como rede protegida quebrada.
+function wifiQrValue(ssid: string, password: string, open: boolean) {
   const escape = (value: string) => value.replace(/([\\;,:"])/g, "\\$1");
+  if (open) {
+    return `WIFI:T:nopass;S:${escape(ssid)};;`;
+  }
   return `WIFI:T:WPA;S:${escape(ssid)};P:${escape(password)};;`;
 }
 
@@ -21,7 +28,7 @@ function wifiQrValue(ssid: string, password: string) {
 // Clicável: gira em 3D (CSS "flip card", sem lib extra) revelando o SSID e
 // a senha em texto puro no verso - útil quando a câmera não está à mão
 // (ex.: digitar a senha manualmente em outro aparelho).
-export function HotspotWifiQr({ ssid, password }: HotspotWifiQrProps) {
+export function HotspotWifiQr({ ssid, password, open }: HotspotWifiQrProps) {
   const [flipped, setFlipped] = useState(false);
 
   const toggle = () => setFlipped((current) => !current);
@@ -51,7 +58,7 @@ export function HotspotWifiQr({ ssid, password }: HotspotWifiQrProps) {
           style={{ backfaceVisibility: "hidden" }}
         >
           <div className="relative">
-            <QRCodeSVG value={wifiQrValue(ssid, password)} size={176} fgColor="#065f46" bgColor="#ffffff" level="M" />
+            <QRCodeSVG value={wifiQrValue(ssid, password, open)} size={176} fgColor="#065f46" bgColor="#ffffff" level="M" />
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-white bg-emerald-600 shadow-sm">
                 <Wifi className="h-5 w-5 text-white" />
@@ -77,7 +84,9 @@ export function HotspotWifiQr({ ssid, password }: HotspotWifiQrProps) {
             <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-emerald-700/60 dark:text-emerald-300/60">
               <KeyRound className="h-3 w-3" /> Senha
             </span>
-            <p className="max-w-full truncate font-mono text-sm font-semibold text-emerald-900 dark:text-emerald-100">{password}</p>
+            <p className="max-w-full truncate font-mono text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+              {open ? "Rede aberta (sem senha)" : password}
+            </p>
           </div>
           <p className="flex items-center gap-1 text-[10px] text-emerald-700/60 dark:text-emerald-300/60">
             <Eye className="h-3 w-3" /> toque para ver o QR

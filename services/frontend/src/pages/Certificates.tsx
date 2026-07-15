@@ -10,6 +10,7 @@ import { IssueCertificateForm } from "@/components/certificates/IssueCertificate
 import type { Certificate, IssueCertificateRequest } from "@/components/certificates/certificate-types";
 import { api, ApiError } from "@/lib/api";
 import { usePageHeader } from "@/hooks/usePageHeader";
+import { useUrlTab } from "@/hooks/useUrlTab";
 
 export function CertificatesPage() {
   usePageHeader({
@@ -19,6 +20,7 @@ export function CertificatesPage() {
 
   const queryClient = useQueryClient();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [tab, setTab] = useUrlTab("issued");
 
   const certificates = useQuery<Certificate[]>({
     queryKey: ["certificates"],
@@ -86,7 +88,7 @@ export function CertificatesPage() {
           <CardTitle>Certificados</CardTitle>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="issued">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
               <TabsTrigger value="issued">
                 <ShieldCheck className="h-4 w-4" />

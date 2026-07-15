@@ -10,9 +10,18 @@ interface HotspotWifiTabProps {
   errors: FieldErrors<ConfigForm>;
   showPassword: boolean;
   onToggleShowPassword: () => void;
+  wifiOpen: boolean;
+  onWifiOpenChange: (open: boolean) => void;
 }
 
-export function HotspotWifiTab({ register, errors, showPassword, onToggleShowPassword }: HotspotWifiTabProps) {
+export function HotspotWifiTab({
+  register,
+  errors,
+  showPassword,
+  onToggleShowPassword,
+  wifiOpen,
+  onWifiOpenChange,
+}: HotspotWifiTabProps) {
   return (
     <TabsContent value="wifi" className="mt-0">
       <fieldset className="space-y-4">
@@ -26,18 +35,40 @@ export function HotspotWifiTab({ register, errors, showPassword, onToggleShowPas
           <div className="space-y-2">
             <Label htmlFor="WIFI_PASSWORD">Senha</Label>
             <div className="relative">
-              <Input id="WIFI_PASSWORD" type={showPassword ? "text" : "password"} {...register("WIFI_PASSWORD")} />
+              <Input
+                id="WIFI_PASSWORD"
+                type={showPassword ? "text" : "password"}
+                disabled={wifiOpen}
+                {...register("WIFI_PASSWORD")}
+              />
               <button
                 type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground disabled:opacity-40"
                 onClick={onToggleShowPassword}
+                disabled={wifiOpen}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            {errors.WIFI_PASSWORD && <p className="text-sm text-destructive">{errors.WIFI_PASSWORD.message}</p>}
+            {!wifiOpen && errors.WIFI_PASSWORD && (
+              <p className="text-sm text-destructive">{errors.WIFI_PASSWORD.message}</p>
+            )}
           </div>
         </div>
+        <label className="flex items-start gap-2 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 accent-primary"
+            checked={wifiOpen}
+            onChange={(event) => onWifiOpenChange(event.target.checked)}
+          />
+          <span>
+            <span className="font-medium">Hotspot livre (sem senha)</span>
+            <span className="block text-xs text-muted-foreground">
+              Qualquer dispositivo próximo se conecta sem digitar senha. Enquanto marcada, a senha acima é ignorada.
+            </span>
+          </span>
+        </label>
       </fieldset>
     </TabsContent>
   );

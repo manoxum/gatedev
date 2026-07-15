@@ -11,7 +11,6 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -53,12 +52,7 @@ func hotspotConfigPresent(ctx context.Context, db *sql.DB) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, key := range requiredHotspotRuntimeKeys {
-		if strings.TrimSpace(config[key]) == "" {
-			return false, nil
-		}
-	}
-	return true, nil
+	return missingHotspotRuntimeKey(config) == "", nil
 }
 
 func pingPostgres(ctx context.Context, db *sql.DB) setupServiceStatus {

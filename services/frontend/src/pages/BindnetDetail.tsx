@@ -24,6 +24,7 @@ import { BindnetServicesTab } from "@/components/bindnets/BindnetServicesTab";
 import { BindnetNeighborsTab } from "@/components/bindnets/BindnetNeighborsTab";
 import { BindnetRoutesTab } from "@/components/bindnets/BindnetRoutesTab";
 import { usePageHeader } from "@/hooks/usePageHeader";
+import { useUrlTab } from "@/hooks/useUrlTab";
 import { useState } from "react";
 
 export function BindnetDetailPage() {
@@ -31,6 +32,7 @@ export function BindnetDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [unlinkOpen, setUnlinkOpen] = useState(false);
+  const [tab, setTab] = useUrlTab("overview");
   const mesh = useMeshData();
   const id = nodeId ? decodeURIComponent(nodeId) : "";
   const data = mesh.data;
@@ -116,8 +118,8 @@ export function BindnetDetailPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="overview">
-        <TabsList>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="grid h-auto w-full grid-cols-5 sm:inline-grid sm:w-auto">
           <TabsTrigger value="overview">
             <LayoutGrid className="h-4 w-4" />
             Overview

@@ -13,17 +13,19 @@ import { GlobalLimitsCard } from "@/components/hotspot/GlobalLimitsCard";
 import { HotspotProfilesCard } from "@/components/hotspot/HotspotProfilesCard";
 import { HotspotVouchersCard } from "@/components/hotspot/HotspotVouchersCard";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
-import { generateRandomWifiPassword } from "@/components/hotspot/generate-password";
+import { hotspotConfigDefaults } from "@/components/hotspot/hotspot-config-defaults";
 import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
 import { useHotspotMutations } from "@/components/hotspot/useHotspotMutations";
 import { LogsPanel } from "@/components/LogsPanel";
 import { usePageHeader } from "@/hooks/usePageHeader";
+import { useUrlTab } from "@/hooks/useUrlTab";
 
 export function HotspotPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [confirmRecoverOpen, setConfirmRecoverOpen] = useState(false);
   const autoPromptedRef = useRef(false);
+  const [tab, setTab] = useUrlTab("connected");
 
   const { status, config, interfaces, clients, blocklist, knownDevices } = useHotspotQueries();
   const { saveAndApply, start, stop, recoverWifi, block, unblock, clearLogs } = useHotspotMutations({
@@ -31,9 +33,17 @@ export function HotspotPage() {
     onRecoverSuccess: () => setConfirmRecoverOpen(false),
   });
 
-  const { register, handleSubmit, reset, formState: { errors, isDirty } } = useForm<ConfigForm>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    formState: { errors, isDirty },
+  } = useForm<ConfigForm>({
     resolver: zodResolver(configSchema),
   });
+  const wifiOpen = watch("WIFI_OPEN") === "true";
 
   const wifiInterfaces = interfaces.data?.filter((i) => i.type === "wifi") ?? [];
   const networkInterfaces = interfaces.data ?? [];
@@ -47,7 +57,7 @@ export function HotspotPage() {
   // inteiro de "Alterar configuracao") - reusa o mesmo salvar+aplicar
   // do formulario completo; a escolha do usuario no dropdown ja e a
   // confirmacao, igual clicar em "Salvar e aplicar" no dialog.
-  const handleQuickSwitchInterface = (field: "WIFI_INTERFACE" | "INTERNET_INTERFACE", value: string) => {
+  const handleQuickSwitchInterface = (field: "WIFI_INTERFACE" | "INTERNET_INTERFACE" | "WIFI_OPEN", value: string) => {
     if (!config.data) return;
     saveAndApply.mutate({ ...config.data, [field]: value } as ConfigForm);
   };
@@ -62,23 +72,7 @@ export function HotspotPage() {
   useEffect(() => {
     if (!config.data || !interfaces.data) return;
     const needsSetup = !config.data.WIFI_SSID || !config.data.WIFI_INTERFACE;
-    const suggestedInterface =
-      config.data.WIFI_INTERFACE || (wifiInterfaces.length === 1 ? wifiInterfaces[0].name : "");
-    reset({
-      WIFI_SSID: config.data.WIFI_SSID ?? "",
-      WIFI_PASSWORD: config.data.WIFI_PASSWORD || generateRandomWifiPassword(),
-      WIFI_INTERFACE: suggestedInterface,
-      INTERNET_INTERFACE: config.data.INTERNET_INTERFACE || "auto",
-      WIFI_COUNTRY: config.data.WIFI_COUNTRY ?? "ST",
-      WIFI_CHANNEL: config.data.WIFI_CHANNEL ?? "auto",
-      WIFI_FREQ_BAND: config.data.WIFI_FREQ_BAND ?? "auto",
-      WIFI_CHANNEL_CANDIDATES: config.data.WIFI_CHANNEL_CANDIDATES ?? "",
-      HOTSPOT_GATEWAY: config.data.HOTSPOT_GATEWAY || "192.168.12.1",
-      HOTSPOT_CIDR: config.data.HOTSPOT_CIDR || "192.168.12.0/24",
-      HOTSPOT_DNS_FALLBACKS: config.data.HOTSPOT_DNS_FALLBACKS ?? "1.1.1.1,8.8.8.8",
-      BINDNET_UPLINK_INTERFACE: config.data.BINDNET_UPLINK_INTERFACE || "bn-uplink",
-      UPLINK_MONITOR_INTERVAL: config.data.UPLINK_MONITOR_INTERVAL || "10",
-    });
+    reset(hotspotConfigDefaults(config.data, wifiInterfaces));
     if (needsSetup && !autoPromptedRef.current) {
       autoPromptedRef.current = true;
       setConfigOpen(true);
@@ -124,7 +118,7 @@ export function HotspotPage() {
         onEdit={() => setConfigOpen(true)}
       />
 
-      <Tabs defaultValue="connected" className="space-y-4">
+      <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <HotspotTabsList connectedCount={connectedCount} blockedCount={blockedCount} />
 
         <TabsContent value="connected" className="mt-0">
@@ -185,6 +179,8 @@ export function HotspotPage() {
         savePending={saveAndApply.isPending}
         showPassword={showPassword}
         onToggleShowPassword={() => setShowPassword((v) => !v)}
+        wifiOpen={wifiOpen}
+        onWifiOpenChange={(open) => setValue("WIFI_OPEN", open ? "true" : "false", { shouldDirty: true, shouldValidate: true })}
         wifiInterfaces={wifiInterfaces}
         networkInterfaces={networkInterfaces}
         confirmRecoverOpen={confirmRecoverOpen}

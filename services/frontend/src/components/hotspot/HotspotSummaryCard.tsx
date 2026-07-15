@@ -1,5 +1,19 @@
 import { lazy, Suspense } from "react";
-import { Flag, Globe, Hash, Play, RefreshCw, Router, Settings2, Square, Waves, Wifi, type LucideIcon } from "lucide-react";
+import {
+  Flag,
+  Globe,
+  Hash,
+  Lock,
+  Play,
+  RefreshCw,
+  Router,
+  Settings2,
+  Square,
+  Unlock,
+  Waves,
+  Wifi,
+  type LucideIcon,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -16,6 +30,14 @@ const HotspotGlobalSpeedPanel = lazy(() =>
   import("@/components/hotspot/HotspotGlobalSpeedPanel").then((m) => ({ default: m.HotspotGlobalSpeedPanel })),
 );
 
+// Mesmas duas opções de WIFI_OPEN aceitas pelo backend (ver
+// hotspot_config_store.go) - "false" mantém WPA2 com a senha já salva,
+// "true" derruba a exigência de senha (ver RULE.md).
+const SECURITY_OPTIONS: InterfaceQuickSwitchOption[] = [
+  { value: "false", label: "WPA2 (com senha)" },
+  { value: "true", label: "Livre (sem senha)" },
+];
+
 interface HotspotSummaryCardProps {
   config: Record<string, string>;
   running: boolean;
@@ -31,7 +53,7 @@ interface HotspotSummaryCardProps {
   currentInternetInterface?: string;
   wifiInterfaceOptions: InterfaceQuickSwitchOption[];
   internetInterfaceOptions: InterfaceQuickSwitchOption[];
-  onQuickSwitchInterface: (field: "WIFI_INTERFACE" | "INTERNET_INTERFACE", value: string) => void;
+  onQuickSwitchInterface: (field: "WIFI_INTERFACE" | "INTERNET_INTERFACE" | "WIFI_OPEN", value: string) => void;
   quickSwitchPending?: boolean;
 }
 
@@ -85,6 +107,7 @@ export function HotspotSummaryCard({
 }: HotspotSummaryCardProps) {
   const ssid = config.WIFI_SSID ?? "";
   const password = config.WIFI_PASSWORD ?? "";
+  const open = config.WIFI_OPEN === "true";
 
   return (
     <Card>
@@ -121,9 +144,17 @@ export function HotspotSummaryCard({
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 pt-5 lg:flex-row lg:items-stretch lg:justify-between">
-        {ssid && password && <HotspotWifiQr ssid={ssid} password={password} />}
+        {ssid && (open || password) && <HotspotWifiQr ssid={ssid} password={password} open={open} />}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:w-auto lg:shrink-0">
           <ConfigItem icon={Wifi} label="SSID" value={ssid} />
+          <HotspotInterfaceQuickSwitch
+            icon={open ? Unlock : Lock}
+            label="Segurança"
+            value={open ? "true" : "false"}
+            options={SECURITY_OPTIONS}
+            onChange={(value) => onQuickSwitchInterface("WIFI_OPEN", value)}
+            disabled={quickSwitchPending}
+          />
           <HotspotInterfaceQuickSwitch
             icon={Router}
             label="Interface Wi-Fi"

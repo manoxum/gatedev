@@ -19,6 +19,8 @@ services:
     networks:
       proxy:
       wnet:
+        aliases:
+          - "${STAGE:-main}.nginx-ui.bindnet.wnet"
 
   postgres:
     image: postgres:16-alpine
@@ -38,6 +40,9 @@ services:
       timeout: 5s
       retries: 10
     networks:
+      dbnet:
+        aliases:
+          - "${STAGE:-main}.postgres.bindnet.dbnet"
       proxy:
         ipv4_address: 10.91.0.10
 
@@ -52,7 +57,10 @@ services:
     volumes:
       - mongo_data:/data/db
     networks:
-      - proxy
+      proxy:
+      dbnet: 
+        aliases:
+          - "${STAGE:-main}.mongo.bindnet.dbnet"
 
   minio:
     image: minio/minio
@@ -94,6 +102,8 @@ networks:
       config:
         - subnet: 10.91.0.0/24
   wnet:
+    external: true    
+  dbnet:
     external: true
 
 volumes:

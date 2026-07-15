@@ -36,7 +36,7 @@ export function MovementDetailDialog({ mac, entry, nature, onOpenChange }: Movem
         </DialogHeader>
         {entry && (
           <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-            <dl className="grid grid-cols-2 gap-3 text-sm">
+            <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-xs text-muted-foreground">Data</dt>
                 <dd>{new Date(entry.createdAt).toLocaleString()}</dd>

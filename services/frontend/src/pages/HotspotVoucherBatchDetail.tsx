@@ -73,7 +73,7 @@ export function HotspotVoucherBatchDetailPage() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle>
             {batch.data.quantity} voucher(s) de {amountLabel}
             {batch.data.note ? ` · ${batch.data.note}` : ""}
@@ -94,7 +94,7 @@ export function HotspotVoucherBatchDetailPage() {
               <TableRow>
                 <TableHead>Código</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Resgatado por</TableHead>
+                <TableHead className="hidden sm:table-cell">Resgatado por</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
@@ -105,7 +105,7 @@ export function HotspotVoucherBatchDetailPage() {
                   <TableCell>
                     <Badge variant={STATUS_BADGE_VARIANT[voucher.status]}>{STATUS_LABELS[voucher.status]}</Badge>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">
+                  <TableCell className="hidden font-mono text-xs sm:table-cell">
                     {voucher.redeemedByMac ? `${voucher.redeemedByMac} · ${new Date(voucher.redeemedAt!).toLocaleString()}` : "-"}
                   </TableCell>
                   <TableCell>

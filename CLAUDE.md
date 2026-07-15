@@ -114,6 +114,38 @@ máquina do usuário da rede Wi-Fi ou da internet.
   TanStack Query + react-hook-form + zod. Mantenha esse padrão em
   telas novas em vez de introduzir outra biblioteca de UI/data
   fetching.
+- **Toda alteração de UI em `services/frontend` deve considerar
+  responsividade (mobile/tablet/desktop), não só desktop.** O painel é
+  operado tanto do computador quanto do celular (ex.: operador
+  ajustando o hotspot pelo Wi-Fi do próprio celular). Breakpoints são
+  os padrões do Tailwind (`sm`=640px, `md`=768px, `lg`=1024px,
+  `xl`=1280px, ver `tailwind.config.js`), e o app já segue estes
+  padrões — reuse-os em vez de inventar outros:
+  - Grids de cartões/formulário: `grid gap-4 sm:grid-cols-2` (e
+    variações `md:`/`lg:` para mais colunas), nunca `grid-cols-N` fixo
+    sem variante responsiva.
+  - Listas de abas (`TabsList`): `grid h-auto w-full grid-cols-N
+    sm:inline-grid sm:w-auto` (ver `HotspotTabsList.tsx`, `Dns.tsx`),
+    para não estourar/cortar em telas pequenas.
+  - Linhas de cabeçalho/ações lado a lado: `flex flex-col gap-4
+    sm:flex-row sm:items-center sm:justify-between` (empilha no
+    celular, vira linha no desktop).
+  - Tabelas densas (`<Table>` de `components/ui/table.tsx`, que já
+    rola horizontalmente via `overflow-auto`): oculte colunas
+    secundárias no celular com `hidden sm:table-cell` /
+    `hidden md:table-cell` no `TableHead`+`TableCell` correspondentes
+    (mesmo índice de coluna nos dois), e reduza texto de botão de ação
+    a só ícone abaixo de `sm` envolvendo o rótulo em `<span
+    className="hidden sm:inline">` (mantendo `aria-label` no
+    `Button` para acessibilidade).
+  - Diálogos (`components/ui/dialog.tsx`): `DialogContent` já é
+    `w-full max-w-lg` por padrão — ao sobrescrever a largura, use
+    sempre `sm:max-w-*` (nunca `max-w-*` sem o prefixo `sm:`), senão o
+    diálogo passa da largura da tela no celular.
+  - Sidebar/nav (`Sidebar.tsx`/`MobileNav.tsx`) já resolvem
+    desktop-vs-mobile (sidebar fixa `sm:flex` + drawer `MobileNav`
+    abaixo de `sm`) — não duplique essa lógica em telas novas, reuse o
+    `AppLayout` existente.
 - Não introduza abstrações, flags ou configuração especulativa para
   cenários que este stack não tem hoje (é uma instalação única, não um
   produto multi-tenant).

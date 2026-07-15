@@ -8,15 +8,17 @@ import { DnsLocalTldsCard } from "@/components/dns/DnsLocalTldsCard";
 import { useDnsQueries } from "@/components/dns/useDnsQueries";
 import { useDnsMutations } from "@/components/dns/useDnsMutations";
 import { usePageHeader } from "@/hooks/usePageHeader";
+import { useUrlTab } from "@/hooks/useUrlTab";
 
 export function DnsPage() {
   usePageHeader({ title: "DNS local (split-horizon)", description: "TLDs locais, malha de descoberta e testes de resolução." });
 
   const { config, records } = useDnsQueries();
   const mutations = useDnsMutations();
+  const [tab, setTab] = useUrlTab("records");
 
   return (
-    <Tabs defaultValue="records" className="space-y-4">
+    <Tabs value={tab} onValueChange={setTab} className="space-y-4">
       <TabsList className="grid h-auto w-full grid-cols-3 sm:inline-grid sm:w-auto">
         <TabsTrigger value="records" className="gap-2">
           <Globe className="h-4 w-4" />

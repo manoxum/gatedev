@@ -36,8 +36,24 @@ O `bindnet` provê, para uma rede local doméstica/pequeno escritório:
 Regras:
 
 - Variáveis obrigatórias: `WIFI_INTERFACE`, `INTERNET_INTERFACE`,
-  `WIFI_SSID`, `WIFI_PASSWORD`. Ausência de qualquer uma delas é erro
-  fatal (o container não sobe).
+  `WIFI_SSID`. Ausência de qualquer uma delas é erro fatal (o container
+  não sobe). `WIFI_PASSWORD` é obrigatória só quando `WIFI_OPEN` não é
+  `true` (ver item abaixo).
+- **`WIFI_OPEN`** (padrão `false`) cria um hotspot livre, sem
+  autenticação nenhuma, quando `true`. O `create_ap` baixado
+  (`oblique/create_ap`) só escreve as diretivas `wpa_*` no
+  `hostapd.conf` quando recebe uma passphrase como último argumento
+  posicional; sem ela, o AP sobe aberto. Por isso o hotspot **omite o
+  argumento inteiro** (não passa uma string vazia) quando `WIFI_OPEN=true`,
+  em vez de reaproveitar `WIFI_PASSWORD` de uma configuração anterior
+  com senha. `WIFI_PASSWORD` continua podendo ficar salva no painel
+  nesse estado (não é apagada ao ligar o modo livre) - só deixa de ser
+  obrigatória e de ser repassada ao `create_ap`, para que voltar
+  `WIFI_OPEN` para `false` não exija digitar a senha de novo. A UI
+  (`services/frontend/src/components/hotspot/HotspotWifiTab.tsx`)
+  desabilita o campo de senha enquanto o modo livre está marcado, e o QR
+  de conexão (`HotspotWifiQr.tsx`) usa o formato `WIFI:T:nopass;...`
+  (sem campo de senha) em vez de `WIFI:T:WPA;...`.
 - `WIFI_CHANNE` (sem "L") é aceito como alias legado de
   `WIFI_CHANNEL`, com aviso de depreciação no log. Não usar em
   configurações novas.

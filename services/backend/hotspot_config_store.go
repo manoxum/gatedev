@@ -13,6 +13,7 @@ var hotspotConfigKeys = []string{
 	"INTERNET_INTERFACE",
 	"WIFI_SSID",
 	"WIFI_PASSWORD",
+	"WIFI_OPEN",
 	"WIFI_COUNTRY",
 	"WIFI_CHANNEL",
 	"WIFI_FREQ_BAND",
@@ -26,6 +27,7 @@ var hotspotConfigKeys = []string{
 
 var hotspotConfigDefaults = map[string]string{
 	"INTERNET_INTERFACE":       "auto",
+	"WIFI_OPEN":                "false",
 	"WIFI_COUNTRY":             "ST",
 	"WIFI_CHANNEL":             "auto",
 	"WIFI_FREQ_BAND":           "auto",
@@ -36,11 +38,33 @@ var hotspotConfigDefaults = map[string]string{
 	"UPLINK_MONITOR_INTERVAL":  "10",
 }
 
+// requiredHotspotRuntimeKeys nao inclui WIFI_PASSWORD: quando
+// WIFI_OPEN=true (hotspot livre, sem autenticacao) o create_ap sobe sem
+// passphrase de proposito (ver try_create_ap em
+// services/worker/hotspot/entrypoint.sh) - a senha so e obrigatoria no
+// caso contrario, checado a parte por missingHotspotRuntimeKey.
 var requiredHotspotRuntimeKeys = []string{
 	"WIFI_INTERFACE",
 	"INTERNET_INTERFACE",
 	"WIFI_SSID",
-	"WIFI_PASSWORD",
+}
+
+// missingHotspotRuntimeKey devolve o nome da primeira chave obrigatoria
+// ausente num config ja resolvido (com defaults aplicados, ver
+// getHotspotConfig), ou "" se completo. Compartilhada por
+// hotspotRuntimeConfig (usada antes de start/apply) e hotspotConfigPresent
+// (services/backend/setup.go, tela de configuracao inicial) para as duas
+// nunca divergirem sobre o que conta como "hotspot configurado".
+func missingHotspotRuntimeKey(config map[string]string) string {
+	for _, key := range requiredHotspotRuntimeKeys {
+		if strings.TrimSpace(config[key]) == "" {
+			return key
+		}
+	}
+	if config["WIFI_OPEN"] != "true" && strings.TrimSpace(config["WIFI_PASSWORD"]) == "" {
+		return "WIFI_PASSWORD"
+	}
+	return ""
 }
 
 func hotspotConfigAllowedSet() map[string]bool {
@@ -85,8 +109,15 @@ func saveHotspotConfig(ctx context.Context, db *sql.DB, values map[string]string
 		}
 		clean[key] = strings.TrimSpace(value)
 	}
-	if password, ok := clean["WIFI_PASSWORD"]; ok && len(password) < 8 {
-		return errors.New("WIFI_PASSWORD deve ter ao menos 8 caracteres (requisito WPA2)")
+	if open, ok := clean["WIFI_OPEN"]; ok && open != "true" && open != "false" {
+		return errors.New("WIFI_OPEN deve ser 'true' ou 'false'")
+	}
+	// A validacao de tamanho minimo so vale para hotspot com senha - um
+	// PATCH que liga WIFI_OPEN e WIFI_PASSWORD (vazio ou nao) na mesma
+	// chamada e o fluxo normal do painel, ver useHotspotMutations.ts
+	// (o formulario sempre envia o objeto de config inteiro).
+	if password, ok := clean["WIFI_PASSWORD"]; ok && clean["WIFI_OPEN"] != "true" && len(password) < 8 {
+		return errors.New("WIFI_PASSWORD deve ter ao menos 8 caracteres (requisito WPA2), a menos que o hotspot esteja marcado como livre (WIFI_OPEN)")
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -114,10 +145,8 @@ func hotspotRuntimeConfig(ctx context.Context, db *sql.DB) (map[string]string, e
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range requiredHotspotRuntimeKeys {
-		if strings.TrimSpace(config[key]) == "" {
-			return nil, fmt.Errorf("%s nao configurado pelo painel", key)
-		}
+	if key := missingHotspotRuntimeKey(config); key != "" {
+		return nil, fmt.Errorf("%s nao configurado pelo painel", key)
 	}
 	return config, nil
 }

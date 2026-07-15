@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { HotspotConfigForm } from "@/components/hotspot/HotspotConfigForm";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
-import { generateRandomWifiPassword } from "@/components/hotspot/generate-password";
+import { hotspotConfigDefaults } from "@/components/hotspot/hotspot-config-defaults";
 import { useHotspotQueries } from "@/components/hotspot/useHotspotQueries";
 
 interface SetupHotspotStepProps {
@@ -24,8 +24,11 @@ export function SetupHotspotStep({ initialData, onNext, onSkip }: SetupHotspotSt
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors, isDirty },
   } = useForm<ConfigForm>({ resolver: zodResolver(configSchema) });
+  const wifiOpen = watch("WIFI_OPEN") === "true";
 
   const wifiInterfaces = interfaces.data?.filter((i) => i.type === "wifi") ?? [];
   const networkInterfaces = interfaces.data ?? [];
@@ -36,23 +39,7 @@ export function SetupHotspotStep({ initialData, onNext, onSkip }: SetupHotspotSt
       return;
     }
     if (!config.data || !interfaces.data) return;
-    const suggestedInterface =
-      config.data.WIFI_INTERFACE || (wifiInterfaces.length === 1 ? wifiInterfaces[0].name : "");
-    reset({
-      WIFI_SSID: config.data.WIFI_SSID || "Bindnet",
-      WIFI_PASSWORD: config.data.WIFI_PASSWORD || generateRandomWifiPassword(),
-      WIFI_INTERFACE: suggestedInterface,
-      INTERNET_INTERFACE: config.data.INTERNET_INTERFACE || "auto",
-      WIFI_COUNTRY: config.data.WIFI_COUNTRY ?? "ST",
-      WIFI_CHANNEL: config.data.WIFI_CHANNEL ?? "auto",
-      WIFI_FREQ_BAND: config.data.WIFI_FREQ_BAND ?? "auto",
-      WIFI_CHANNEL_CANDIDATES: config.data.WIFI_CHANNEL_CANDIDATES ?? "",
-      HOTSPOT_GATEWAY: config.data.HOTSPOT_GATEWAY || "192.168.12.1",
-      HOTSPOT_CIDR: config.data.HOTSPOT_CIDR || "192.168.12.0/24",
-      HOTSPOT_DNS_FALLBACKS: config.data.HOTSPOT_DNS_FALLBACKS ?? "1.1.1.1,8.8.8.8",
-      BINDNET_UPLINK_INTERFACE: config.data.BINDNET_UPLINK_INTERFACE || "bn-uplink",
-      UPLINK_MONITOR_INTERVAL: config.data.UPLINK_MONITOR_INTERVAL || "10",
-    });
+    reset(hotspotConfigDefaults(config.data, wifiInterfaces, "Bindnet"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialData, config.data, interfaces.data, reset]);
 
@@ -75,6 +62,8 @@ export function SetupHotspotStep({ initialData, onNext, onSkip }: SetupHotspotSt
           savePending={false}
           showPassword={showPassword}
           onToggleShowPassword={() => setShowPassword((current) => !current)}
+          wifiOpen={wifiOpen}
+          onWifiOpenChange={(open) => setValue("WIFI_OPEN", open ? "true" : "false", { shouldDirty: true, shouldValidate: true })}
           wifiInterfaces={wifiInterfaces}
           networkInterfaces={networkInterfaces}
           showActions={false}

@@ -16,6 +16,8 @@ interface HotspotDialogsProps {
   savePending: boolean;
   showPassword: boolean;
   onToggleShowPassword: () => void;
+  wifiOpen: boolean;
+  onWifiOpenChange: (open: boolean) => void;
   wifiInterfaces: NetworkInterface[];
   networkInterfaces: NetworkInterface[];
   confirmRecoverOpen: boolean;
@@ -39,6 +41,8 @@ export function HotspotDialogs({
   savePending,
   showPassword,
   onToggleShowPassword,
+  wifiOpen,
+  onWifiOpenChange,
   wifiInterfaces,
   networkInterfaces,
   confirmRecoverOpen,
@@ -65,6 +69,8 @@ export function HotspotDialogs({
             savePending={savePending}
             showPassword={showPassword}
             onToggleShowPassword={onToggleShowPassword}
+            wifiOpen={wifiOpen}
+            onWifiOpenChange={onWifiOpenChange}
             wifiInterfaces={wifiInterfaces}
             networkInterfaces={networkInterfaces}
           />

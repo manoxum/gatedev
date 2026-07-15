@@ -73,7 +73,7 @@ export function HotspotProfilesCard() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle>Perfis de dispositivo</CardTitle>
         <Button size="sm" onClick={() => setEditing(emptyProfile)}>
           <Plus className="h-4 w-4" />
@@ -85,9 +85,9 @@ export function HotspotProfilesCard() {
           <TableHeader>
             <TableRow>
               <TableHead>Nome</TableHead>
-              <TableHead>Taxa</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Detalhe</TableHead>
+              <TableHead className="hidden sm:table-cell">Taxa</TableHead>
+              <TableHead className="hidden sm:table-cell">Tipo</TableHead>
+              <TableHead className="hidden md:table-cell">Detalhe</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
@@ -100,9 +100,9 @@ export function HotspotProfilesCard() {
                     {profile.isDefault && <Badge variant="secondary">Padrão</Badge>}
                   </div>
                 </TableCell>
-                <TableCell className="text-sm">{rateSummary(profile)}</TableCell>
-                <TableCell className="text-sm">{LIMIT_TYPE_LABELS[profile.limitType]}</TableCell>
-                <TableCell className="text-sm">{typeDetailSummary(profile)}</TableCell>
+                <TableCell className="hidden text-sm sm:table-cell">{rateSummary(profile)}</TableCell>
+                <TableCell className="hidden text-sm sm:table-cell">{LIMIT_TYPE_LABELS[profile.limitType]}</TableCell>
+                <TableCell className="hidden text-sm md:table-cell">{typeDetailSummary(profile)}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => setEditing(profile)}>

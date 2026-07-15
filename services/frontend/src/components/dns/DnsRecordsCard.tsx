@@ -64,7 +64,7 @@ export function DnsRecordsCard({ records, mutations }: DnsRecordsCardProps) {
             <TableRow>
               <TableHead>Hostname</TableHead>
               <TableHead>Endereço</TableHead>
-              <TableHead>Criado em</TableHead>
+              <TableHead className="hidden sm:table-cell">Criado em</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
@@ -73,17 +73,18 @@ export function DnsRecordsCard({ records, mutations }: DnsRecordsCardProps) {
               <TableRow key={record.hostname}>
                 <TableCell className="font-mono text-xs">{record.hostname}</TableCell>
                 <TableCell className="font-mono text-xs">{record.address}</TableCell>
-                <TableCell>{new Date(record.createdAt).toLocaleString()}</TableCell>
+                <TableCell className="hidden sm:table-cell">{new Date(record.createdAt).toLocaleString()}</TableCell>
                 <TableCell>
                   <div className="flex justify-end">
                     <Button
                       variant="secondary"
                       size="sm"
+                      aria-label="Remover"
                       disabled={removeRecord.isPending && removeRecord.variables === record.hostname}
                       onClick={() => removeRecord.mutate(record.hostname)}
                     >
                       <Trash2 className="h-4 w-4" />
-                      Remover
+                      <span className="hidden sm:inline">Remover</span>
                     </Button>
                   </div>
                 </TableCell>

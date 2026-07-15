@@ -72,7 +72,7 @@ export function LogsPanel({ title, path, onClear }: LogsPanelProps) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+      <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="text-base">{title}</CardTitle>
         <div className="flex items-center gap-2">
           {onClear && (

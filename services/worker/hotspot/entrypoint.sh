@@ -54,6 +54,7 @@ load_runtime_config_from_db() {
   wait_for_hotspot_config_table || return 1
 
   INTERNET_INTERFACE="auto"
+  WIFI_OPEN="false"
   WIFI_COUNTRY="ST"
   WIFI_CHANNEL="auto"
   WIFI_FREQ_BAND="auto"
@@ -72,6 +73,7 @@ load_runtime_config_from_db() {
       'INTERNET_INTERFACE',
       'WIFI_SSID',
       'WIFI_PASSWORD',
+      'WIFI_OPEN',
       'WIFI_COUNTRY',
       'WIFI_CHANNEL',
       'WIFI_FREQ_BAND',
@@ -92,7 +94,7 @@ load_runtime_config_from_db() {
   while IFS=$'\t' read -r key value; do
     [[ -n "${key}" ]] || continue
     case "${key}" in
-      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL)
+      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_OPEN|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL)
         printf -v "${key}" '%s' "${value}"
         export "${key}"
         ;;
@@ -278,7 +280,16 @@ required() {
 required WIFI_INTERFACE
 required INTERNET_INTERFACE
 required WIFI_SSID
-required WIFI_PASSWORD
+
+# WIFI_OPEN=true cria um hotspot livre (sem autenticacao): create_ap so
+# gera as diretivas wpa_* do hostapd quando recebe uma passphrase (ver
+# try_create_ap mais abaixo) - nesse modo WIFI_PASSWORD nunca e
+# obrigatoria nem repassada ao create_ap, mesmo que ja exista um valor
+# salvo de uma configuracao anterior com senha.
+WIFI_OPEN="${WIFI_OPEN:-false}"
+if [[ "${WIFI_OPEN}" != "true" ]]; then
+  required WIFI_PASSWORD
+fi
 
 HOTSPOT_GATEWAY="${HOTSPOT_GATEWAY:-192.168.12.1}"
 HOTSPOT_CIDR="${HOTSPOT_CIDR:-${HOTSPOT_GATEWAY%.*}.0/24}"
@@ -487,6 +498,23 @@ try_create_ap() {
   log "Gateway do hotspot: ${HOTSPOT_GATEWAY}; DNS entregues por DHCP: ${DHCP_DNS_SERVERS}."
   log "Dominios de busca entregues por DHCP: ${DHCP_SEARCH_DOMAINS}."
 
+  # ap_credential_args monta o SSID (+ passphrase, quando nao livre) como
+  # os ultimos argumentos posicionais do create_ap. Passphrase OMITIDA
+  # (nao vazia - ausente mesmo) e a forma suportada pelo proprio
+  # create_ap de pedir rede aberta: ele so escreve as diretivas wpa_* no
+  # hostapd.conf quando recebe uma passphrase (`if [[ -n "$PASSPHRASE"
+  # ]]`, oblique/create_ap) - sem isso, hostapd sobe sem autenticacao
+  # nenhuma. WIFI_OPEN=true nunca reusa uma WIFI_PASSWORD ja salva de uma
+  # configuracao anterior com senha.
+  local -a ap_credential_args=("${WIFI_SSID}")
+  local security_display="WPA2 (com senha)"
+  if [[ "${WIFI_OPEN}" == "true" ]]; then
+    security_display="livre (sem senha, rede aberta)"
+  else
+    ap_credential_args+=("${WIFI_PASSWORD}")
+  fi
+  log "Seguranca: ${security_display}."
+
   # Roda em segundo plano e usa "wait $PID" (em vez de um pipe em
   # primeiro plano) de proposito: o bash so garante que um trap (ver
   # "trap cleanup EXIT" / "trap ... INT TERM" mais abaixo) interrompe e
@@ -506,8 +534,7 @@ try_create_ap() {
     -g "${HOTSPOT_GATEWAY}" \
     "${WIFI_INTERFACE}" \
     "${CREATE_AP_INTERNET_INTERFACE}" \
-    "${WIFI_SSID}" \
-    "${WIFI_PASSWORD}" > >(tee "${CREATE_AP_LOG}") 2>&1 &
+    "${ap_credential_args[@]}" > >(tee "${CREATE_AP_LOG}") 2>&1 &
   CREATE_AP_PID=$!
   start_beacon_failure_watcher "${CREATE_AP_LOG}" "${CREATE_AP_PID}" "${band}" "${channel}"
   wait "${CREATE_AP_PID}" || status=$?
