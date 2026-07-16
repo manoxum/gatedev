@@ -10,6 +10,7 @@ FROM alpine:3.22
 # Dockerfile de producao - ver comentario la para detalhes.
 RUN apk add --no-cache \
     bash \
+    conntrack-tools \
     curl \
     dnsmasq \
     grep \
@@ -37,8 +38,8 @@ RUN curl -fsSL https://raw.githubusercontent.com/oblique/create_ap/master/create
     && rm /tmp/patch-create-ap.sh \
     && chmod +x /usr/local/bin/create_ap
 
-COPY entrypoint.sh channel.sh sta_link.sh interfaces.sh uplink.sh regulatory.sh watchdog.sh history.sh /usr/local/bin/
+COPY entrypoint.sh channel.sh sta_link.sh interfaces.sh uplink.sh uplink_monitor.sh regulatory.sh watchdog.sh history.sh /usr/local/bin/
 RUN mv /usr/local/bin/entrypoint.sh /usr/local/bin/hotspot-entrypoint.sh \
-    && chmod +x /usr/local/bin/hotspot-entrypoint.sh /usr/local/bin/channel.sh /usr/local/bin/sta_link.sh /usr/local/bin/interfaces.sh /usr/local/bin/uplink.sh /usr/local/bin/regulatory.sh /usr/local/bin/watchdog.sh /usr/local/bin/history.sh
+    && chmod +x /usr/local/bin/hotspot-entrypoint.sh /usr/local/bin/channel.sh /usr/local/bin/sta_link.sh /usr/local/bin/interfaces.sh /usr/local/bin/uplink.sh /usr/local/bin/uplink_monitor.sh /usr/local/bin/regulatory.sh /usr/local/bin/watchdog.sh /usr/local/bin/history.sh
 
 ENTRYPOINT ["/usr/local/bin/hotspot-entrypoint.sh"]

@@ -314,12 +314,14 @@ WIFI_FREQ_BAND="${WIFI_FREQ_BAND:-auto}"
 # history.sh precisa vir antes de channel.sh, que chama suas funcoes;
 # sta_link.sh vem depois de channel.sh (usa freq_to_channel);
 # uplink.sh vem depois de interfaces.sh e sta_link.sh (usa funcoes/
-# variaveis dos dois).
+# variaveis dos dois); uplink_monitor.sh (saude/failover do uplink)
+# vem depois de uplink.sh.
 source "$(dirname "$0")/history.sh"
 source "$(dirname "$0")/channel.sh"
 source "$(dirname "$0")/sta_link.sh"
 source "$(dirname "$0")/interfaces.sh"
 source "$(dirname "$0")/uplink.sh"
+source "$(dirname "$0")/uplink_monitor.sh"
 source "$(dirname "$0")/regulatory.sh"
 source "$(dirname "$0")/watchdog.sh"
 

@@ -1,16 +1,56 @@
 #!/usr/bin/env bash
-# uplink.sh - uplink virtual estavel (bn-uplink) do hotspot: NAT/
-# forward para a fonte real de internet e o monitor que alterna essa
-# fonte AO VIVO, sem reiniciar o create_ap. Extraido de interfaces.sh
-# (que ficou so com resolucao/validacao de interfaces) pra manter cada
-# arquivo focado num unico dominio (ver CLAUDE.md - limite de ~200
-# linhas por arquivo). Sourced pelo entrypoint.sh depois de
-# interfaces.sh (usa is_real_internet_interface/best_internet_interface
-# e as variaveis BINDNET_UPLINK_INTERFACE/UPLINK_MONITOR_INTERVAL de
-# la) e de sta_link.sh (usa sta_link_probe).
+# uplink.sh - mecanica do uplink virtual estavel (bn-uplink) do
+# hotspot: NAT/forward + roteamento por politica para a fonte real de
+# internet. A decisao de QUANDO trocar a fonte (saude, failover,
+# mudanca pelo painel) mora em uplink_monitor.sh. Sourced pelo
+# entrypoint.sh depois de interfaces.sh (usa
+# is_real_internet_interface e as variaveis
+# BINDNET_UPLINK_INTERFACE/UPLINK_MONITOR_INTERVAL de la).
 
 UPLINK_FILTER_CHAIN="BINDNET-HOTSPOT"
 UPLINK_NAT_CHAIN="BINDNET-HOTSPOT"
+
+# Roteamento por politica: o MASQUERADE "-o <iface>" sozinho NAO muda
+# por onde o trafego sai - quem decide e a tabela de rotas do host, e
+# com duas rotas default simultaneas (ex.: Ethernet metric 100 +
+# Wi-Fi metric 600) o kernel continuaria saindo pela de menor metric,
+# ignorando a fonte escolhida aqui. As duas ip rules abaixo fazem o
+# trafego do HOTSPOT_CIDR resolver destinos locais/LAN pela tabela
+# main normalmente (suppress_prefixlength 0 ignora SO as rotas default
+# dela) e buscar a rota default na tabela dedicada - que aponta sempre
+# pra fonte de internet escolhida. "91" ecoa o prefixo interno
+# 10.91.x do stack; as prioridades ficam antes da main (32766).
+UPLINK_ROUTE_TABLE=91
+UPLINK_RULE_PRIORITY_LOCAL=30090
+UPLINK_RULE_PRIORITY_DEFAULT=30091
+
+ensure_bindnet_uplink_ip_rules() {
+  if ! ip rule show | grep -q "^${UPLINK_RULE_PRIORITY_LOCAL}:"; then
+    ip rule add priority "${UPLINK_RULE_PRIORITY_LOCAL}" from "${HOTSPOT_CIDR}" lookup main suppress_prefixlength 0
+  fi
+  if ! ip rule show | grep -q "^${UPLINK_RULE_PRIORITY_DEFAULT}:"; then
+    ip rule add priority "${UPLINK_RULE_PRIORITY_DEFAULT}" from "${HOTSPOT_CIDR}" lookup "${UPLINK_ROUTE_TABLE}"
+  fi
+}
+
+apply_bindnet_uplink_route() {
+  local iface="$1"
+  local gateway
+  gateway="$(ip -4 route show default dev "${iface}" 2>/dev/null \
+    | awk '{ for (i = 1; i < NF; i++) if ($i == "via") { print $(i + 1); exit } }')"
+  if [[ -n "${gateway}" ]]; then
+    ip route replace default via "${gateway}" dev "${iface}" table "${UPLINK_ROUTE_TABLE}"
+  else
+    # Sem gateway conhecido na main (ex.: link ponto-a-ponto ou ainda
+    # sem rota default): rota direta pelo proprio device.
+    ip route replace default dev "${iface}" table "${UPLINK_ROUTE_TABLE}"
+  fi
+  # Fluxos ja estabelecidos ficariam presos ao SNAT/rota antigos pelo
+  # conntrack mesmo com a rota nova - derruba as entradas dos clientes
+  # do hotspot pra que reconectem ja pela fonte nova. Best-effort: sem
+  # o binario conntrack, os fluxos antigos so expiram sozinhos.
+  conntrack -D -s "${HOTSPOT_CIDR}" >/dev/null 2>&1 || true
+}
 
 ensure_iptables_chain() {
   local table="$1"
@@ -69,6 +109,9 @@ apply_bindnet_uplink_rules() {
   iptables -w -A "${UPLINK_FILTER_CHAIN}" -i "${iface}" -d "${HOTSPOT_CIDR}" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
   iptables -w -t nat -A "${UPLINK_NAT_CHAIN}" -s "${HOTSPOT_CIDR}" -o "${iface}" -j MASQUERADE
 
+  ensure_bindnet_uplink_ip_rules
+  apply_bindnet_uplink_route "${iface}"
+
   REAL_INTERNET_INTERFACE="${iface}"
   INTERNET_INTERFACE="${iface}"
   local interface_display="${REAL_INTERNET_INTERFACE}"
@@ -100,30 +143,6 @@ db_internet_strategy() {
   psql_hotspot -Atqc "SELECT value FROM hotspot_config WHERE key = 'INTERNET_INTERFACE'" 2>/dev/null || true
 }
 
-# uplink_target_for_strategy resolve uma estrategia (auto/nome fixo)
-# para a interface real utilizavel AGORA, ou nada se nao houver:
-# - auto: melhor candidata (exclui WIFI_INTERFACE, ver
-#   best_internet_interface);
-# - a propria placa Wi-Fi (Wi-Fi para Wi-Fi): so vale com a associacao
-#   STA de pe (sta_link_probe, que ja rejeita a placa em modo AP) - em
-#   --no-virt nao ha estacao nenhuma pra servir de uplink, e ai a troca
-#   ao vivo e impossivel (exige reiniciar o hotspot pra reassociar);
-# - qualquer outra interface: precisa existir e ser elegivel.
-uplink_target_for_strategy() {
-  local strategy="$1"
-  if [[ "${strategy}" == "auto" ]]; then
-    best_internet_interface
-    return 0
-  fi
-  if [[ "${strategy}" == "${WIFI_INTERFACE}" ]] && ! sta_link_probe; then
-    return 0
-  fi
-  if ! is_real_internet_interface "${strategy}"; then
-    return 0
-  fi
-  printf '%s\n' "${strategy}"
-}
-
 # refresh_internet_strategy_from_db realinha INTERNET_INTERFACE/
 # INTERNET_STRATEGY/REAL_INTERNET_INTERFACE deste processo com o banco
 # - chamada por attempt_hotspot_cycle (entrypoint.sh) antes de cada
@@ -140,52 +159,8 @@ refresh_internet_strategy_from_db() {
   resolve_internet_interface
 }
 
-# start_uplink_monitor roda SEMPRE (nao so em INTERNET_INTERFACE=auto,
-# como era antes): alem de seguir a melhor interface no modo auto, ele
-# detecta mudanca de INTERNET_INTERFACE feita pelo painel (via banco) e
-# alterna o NAT ao vivo - o create_ap/hostapd e os clientes associados
-# nem percebem, so a rota de saida muda. "warned" evita repetir o mesmo
-# aviso a cada tick enquanto a situacao nao muda.
-start_uplink_monitor() {
-  (
-    local strategy="${INTERNET_STRATEGY}"
-    local current="${REAL_INTERNET_INTERFACE}"
-    local desired detected warned=""
-
-    while true; do
-      sleep "${UPLINK_MONITOR_INTERVAL}"
-      desired="$(db_internet_strategy)"
-      [[ -n "${desired}" ]] || desired="${strategy}"
-      if [[ "${desired}" != "${strategy}" ]]; then
-        log "Fonte de internet alterada pelo painel: ${strategy} -> ${desired}; alternando ao vivo, sem reiniciar o hotspot."
-        strategy="${desired}"
-        warned=""
-      fi
-      detected="$(uplink_target_for_strategy "${strategy}")"
-      if [[ -z "${detected}" ]]; then
-        if [[ -z "${warned}" ]]; then
-          log "AVISO: fonte de internet '${strategy}' sem interface utilizavel agora; mantendo ${current}."
-          warned=1
-        fi
-        continue
-      fi
-      if [[ "${detected}" == "${current}" ]]; then
-        warned=""
-        continue
-      fi
-      if apply_bindnet_uplink_rules "${detected}"; then
-        log "Uplink alternado de ${current} para ${detected} sem reiniciar o hotspot."
-        current="${detected}"
-        warned=""
-      elif [[ -z "${warned}" ]]; then
-        log "AVISO: nao foi possivel aplicar NAT/forward para ${detected}; mantendo ${current}."
-        warned=1
-      fi
-    done
-  ) &
-  UPLINK_MONITOR_PID=$!
-  log "Monitor de uplink ativo a cada ${UPLINK_MONITOR_INTERVAL}s (estrategia: ${INTERNET_STRATEGY}; fonte atual: ${REAL_INTERNET_INTERFACE})."
-}
+# start_uplink_monitor (e toda a logica de saude/failover/troca pelo
+# painel) mora em uplink_monitor.sh - ver o comentario no topo de la.
 
 cleanup_bindnet_uplink() {
   if [[ -n "${UPLINK_MONITOR_PID:-}" ]]; then
@@ -200,6 +175,10 @@ cleanup_bindnet_uplink() {
   iptables -w -X "${UPLINK_FILTER_CHAIN}" >/dev/null 2>&1 || true
   iptables -w -t nat -F "${UPLINK_NAT_CHAIN}" >/dev/null 2>&1 || true
   iptables -w -t nat -X "${UPLINK_NAT_CHAIN}" >/dev/null 2>&1 || true
+
+  ip rule del priority "${UPLINK_RULE_PRIORITY_LOCAL}" >/dev/null 2>&1 || true
+  ip rule del priority "${UPLINK_RULE_PRIORITY_DEFAULT}" >/dev/null 2>&1 || true
+  ip route flush table "${UPLINK_ROUTE_TABLE}" >/dev/null 2>&1 || true
 
   ip link delete "${BINDNET_UPLINK_INTERFACE}" >/dev/null 2>&1 || true
 }

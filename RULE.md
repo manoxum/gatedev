@@ -158,31 +158,64 @@ Regras:
 - **`INTERNET_INTERFACE`** aceita o nome de uma interface fixa ou
   `auto`: nesse caso o hotspot avalia as rotas padrão IPv4 do host
   (`ip -o route show default`), ignora interfaces virtuais/loopback, e
-  escolhe a interface real com maior velocidade reportada em
-  `/sys/class/net/<iface>/speed`; a métrica da rota desempata. Se não
-  houver rota padrão, tenta interfaces reais `UP`; se ainda assim não
-  encontrar nenhuma candidata, falha explicitamente — mesma filosofia de
-  nunca adivinhar silenciosamente já usada para canal/banda (`auto` só
-  age quando o valor é explicitamente esse; a variável continua
-  obrigatória e sem fallback quando ausente). A interface real escolhida
-  **não é passada diretamente ao `create_ap`**: o hotspot cria uma
-  interface dummy estável (`BINDNET_UPLINK_INTERFACE`, padrão
-  `bn-uplink`) e instala regras próprias em chains `BINDNET-HOTSPOT` de
-  `FORWARD`/`POSTROUTING` para alimentar esse uplink virtual pela fonte
-  real. Um monitor de uplink (`UPLINK_MONITOR_INTERVAL`, padrão 10s,
-  ver `services/worker/hotspot/uplink.sh`) roda **sempre** (não só no
-  modo `auto`): além de reavaliar a melhor interface em `auto`, ele lê
-  `INTERNET_INTERFACE` direto do banco a cada ciclo e, quando o painel
-  troca a fonte (quick-switch do card de resumo → `POST
-  /api/hotspot/uplink`, que só grava a chave), alterna **somente as
-  regras de NAT/forward, ao vivo, sem derrubar/recriar o AP** — os
-  clientes conectados não caem. A única troca que exige reiniciar o
-  hotspot é passar a fonte para a própria placa Wi-Fi
-  (`INTERNET_INTERFACE == WIFI_INTERFACE`) enquanto o AP está em
-  `--no-virt` (sem associação de estação): sem estação não há uplink
-  Wi-Fi possível, o monitor loga um aviso e mantém a fonte atual até
-  um restart reassociar a placa. `attempt_hotspot_cycle` também relê
-  essa chave do banco antes de cada rodada
+  ranqueia as candidatas por maior velocidade reportada em
+  `/sys/class/net/<iface>/speed` (métrica da rota desempata; Wi-Fi não
+  reporta velocidade e fica atrás de qualquer Ethernet de propósito);
+  sem rota padrão, entram interfaces com link físico ativo (carrier)
+  como último recurso; se ainda assim não houver candidata, falha
+  explicitamente — mesma filosofia de nunca adivinhar silenciosamente
+  já usada para canal/banda. A **própria placa Wi-Fi do hotspot entra
+  como candidata do `auto`** somente quando está associada como
+  estação agora (`sta_link_probe`, que rejeita a placa em modo AP) —
+  é o único fallback possível numa máquina com uma única porta
+  Ethernet; em `--no-virt` ela nunca é candidata. A interface real
+  escolhida **não é passada diretamente ao `create_ap`**: o hotspot
+  cria uma interface dummy estável (`BINDNET_UPLINK_INTERFACE`, padrão
+  `bn-uplink`), instala regras próprias em chains `BINDNET-HOTSPOT` de
+  `FORWARD`/`POSTROUTING` **e roteamento por política** (tabela
+  dedicada `91` + `ip rule` para o `HOTSPOT_CIDR`, ver `uplink.sh`):
+  o `MASQUERADE -o <iface>` sozinho não muda por onde o tráfego sai —
+  com duas rotas default simultâneas (Ethernet + Wi-Fi) o kernel
+  continuaria usando a de menor métrica, ignorando a fonte escolhida;
+  a tabela dedicada garante que o tráfego dos clientes do hotspot sai
+  sempre pela fonte selecionada, independente da rota preferida do
+  host. Na troca, as entradas de conntrack dos clientes são derrubadas
+  (`conntrack -D`, best-effort) para os fluxos reconectarem já pela
+  fonte nova. Um monitor de uplink (`services/worker/hotspot/
+  uplink_monitor.sh`) roda **sempre**: lê `INTERNET_INTERFACE` direto
+  do banco e, quando o painel troca a fonte (quick-switch do card de
+  resumo → `POST /api/hotspot/uplink`, que só grava a chave), alterna
+  NAT/rota **ao vivo, sem derrubar/recriar o AP** — os clientes
+  conectados não caem. No modo `auto` ele também vigia a **saúde** da
+  fonte atual a cada `UPLINK_HEALTH_CHECK_INTERVAL` segundos (padrão
+  3s; env do container, sem equivalente no painel): link físico via
+  `carrier` **e internet de verdade** via `ping -I` pela própria
+  interface (alvos = `HOTSPOT_DNS_FALLBACKS`, timeout 2s — 1s dava
+  falso-negativo na STA Wi-Fi, cujo rádio é compartilhado com o AP).
+  Link físico morto = failover **imediato e orientado a evento**: o
+  monitor dorme escutando `ip monitor link` (netlink) e acorda no
+  instante em que a interface atual muda de estado — desligar a placa
+  à mão é percebido em ~1s, sem esperar o tick de polling (que
+  continua existindo como retaguarda); internet perdida com link de
+  pé = failover após `UPLINK_HEALTH_FAILURES_THRESHOLD` checagens
+  ruins seguidas (padrão 2, ~6-9s — 1 ping perdido é normal e trocar
+  na primeira falha causava ping-pong entre fontes). O destino é
+  sempre a próxima candidata **com internet comprovada**; sem nenhuma
+  comprovada, mantém a fonte atual (nunca troca "no escuro") — exceto
+  com o link físico morto, quando qualquer candidata com carrier
+  serve;
+  a reavaliação "apareceu candidata melhor?" e a leitura do painel
+  continuam na cadência de `UPLINK_MONITOR_INTERVAL` (padrão 10s). O
+  painel acompanha: cada troca loga "Fonte real de internet do
+  hotspot: ...", linha da qual `GET /api/hotspot/status` extrai a
+  interface em uso (`parseHotspotInternetInterface`) — o card de
+  resumo mostra "auto (interface)" atualizado no poll de 5s. A única
+  troca que exige reiniciar o hotspot é passar a fonte para a própria
+  placa Wi-Fi (`INTERNET_INTERFACE == WIFI_INTERFACE`) enquanto o AP
+  está em `--no-virt` (sem associação de estação): sem estação não há
+  uplink Wi-Fi possível, o monitor loga um aviso e mantém a fonte
+  atual até um restart reassociar a placa. `attempt_hotspot_cycle`
+  também relê essa chave do banco antes de cada rodada
   (`refresh_internet_strategy_from_db`), para um retry pós-queda já
   raciocinar com a fonte mais recente. `INTERNET_INTERFACE` pode ser a
   **mesma** interface de `WIFI_INTERFACE` (hotspot e saída de internet

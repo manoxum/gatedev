@@ -67,69 +67,70 @@ interface_speed_mbps() {
   fi
 }
 
-pick_better_interface() {
-  local candidate="$1"
-  local metric="$2"
-  local speed
-  speed="$(interface_speed_mbps "${candidate}")"
-
-  if [[ -z "${BEST_IFACE:-}" ]] ||
-     [[ "${speed}" -gt "${BEST_SPEED:-0}" ]] ||
-     { [[ "${speed}" -eq "${BEST_SPEED:-0}" ]] && [[ "${metric}" -lt "${BEST_METRIC:-999999}" ]]; }; then
-    BEST_IFACE="${candidate}"
-    BEST_SPEED="${speed}"
-    BEST_METRIC="${metric}"
+# auto_candidate_allowed decide se uma interface pode entrar na
+# selecao automatica (INTERNET_INTERFACE=auto). A placa do hotspot
+# (WIFI_INTERFACE) so entra quando esta associada como ESTACAO agora
+# (sta_link_probe, sta_link.sh - que ja rejeita a placa em modo AP):
+# nesse estado ela e uma fonte de internet legitima e o unico fallback
+# possivel numa maquina com uma unica porta Ethernet. Sem o probe, a
+# deteccao automatica podia escolher o proprio radio do AP como "fonte
+# de internet" quando ele aparece UP, alternando NAT/forward para ele
+# e derrubando o beacon/clientes associados.
+auto_candidate_allowed() {
+  local iface="$1"
+  is_real_internet_interface "${iface}" || return 1
+  if [[ "${iface}" == "${WIFI_INTERFACE}" ]]; then
+    sta_link_probe || return 1
   fi
+  return 0
+}
+
+# ranked_internet_candidates imprime as candidatas do modo auto em
+# ordem de preferencia: primeiro interfaces com rota padrao IPv4
+# (maior velocidade reportada em /sys/class/net/<iface>/speed; metric
+# menor desempata - Wi-Fi nao reporta speed e fica atras de qualquer
+# Ethernet, de proposito), depois interfaces com link fisico ativo
+# (carrier) mas sem rota padrao, como ultimo recurso. Usada por
+# best_internet_interface e pelo monitor de uplink
+# (uplink_monitor.sh), que percorre a lista testando internet de
+# verdade em cada candidata. Campos de ordenacao com largura fixa
+# (sort lexicografico do BusyBox funciona como numerico).
+ranked_internet_candidates() {
+  local line iface metric speed
+  {
+    while IFS= read -r line; do
+      iface=""
+      metric=0
+      read -r -a tokens <<< "${line}"
+      for index in "${!tokens[@]}"; do
+        if [[ "${tokens[$index]}" == "dev" ]]; then
+          iface="${tokens[$((index + 1))]:-}"
+        elif [[ "${tokens[$index]}" == "metric" ]]; then
+          metric="${tokens[$((index + 1))]:-0}"
+        fi
+      done
+      [[ -n "${iface}" ]] || continue
+      auto_candidate_allowed "${iface}" || continue
+      speed="$(interface_speed_mbps "${iface}")"
+      printf '0 %06d %06d %s\n' "$((999999 - speed))" "${metric}" "${iface}"
+    done < <(ip -o route show default 2>/dev/null || true)
+
+    for path in /sys/class/net/*; do
+      iface="${path##*/}"
+      auto_candidate_allowed "${iface}" || continue
+      [[ "$(cat "/sys/class/net/${iface}/carrier" 2>/dev/null)" == "1" ]] || continue
+      speed="$(interface_speed_mbps "${iface}")"
+      printf '1 %06d 999999 %s\n' "$((999999 - speed))" "${iface}"
+    done
+  } | sort | awk '{ print $NF }' | awk '!seen[$0]++'
 }
 
 # best_internet_interface so roda no modo INTERNET_INTERFACE=auto
-# (resolve_internet_interface/start_uplink_monitor). Exclui
-# WIFI_INTERFACE explicitamente aqui (e so aqui - ver comentario em
-# is_real_internet_interface acima): sem isso, a deteccao automatica
-# pode escolher o proprio radio do hotspot como "fonte de internet"
-# quando ele aparece UP, alternando NAT/forward para ele a cada ciclo
-# (UPLINK_MONITOR_INTERVAL) e derrubando o beacon/clientes associados.
-# Isso nao se aplica quando o usuario escolhe INTERNET_INTERFACE
-# explicitamente igual a WIFI_INTERFACE (Wi-Fi para Wi-Fi) - nesse
-# caso resolve_internet_interface nem chama esta funcao.
+# (resolve_internet_interface e o fallback do monitor de uplink) - a
+# melhor candidata por rota/velocidade, SEM testar internet de
+# verdade; quem testa e best_uplink_with_internet (uplink_monitor.sh).
 best_internet_interface() {
-  local line iface metric token index
-  BEST_IFACE=""
-  BEST_SPEED=0
-  BEST_METRIC=999999
-
-  while IFS= read -r line; do
-    iface=""
-    metric=0
-    read -r -a tokens <<< "${line}"
-    for index in "${!tokens[@]}"; do
-      token="${tokens[$index]}"
-      if [[ "${token}" == "dev" ]]; then
-        iface="${tokens[$((index + 1))]:-}"
-      elif [[ "${token}" == "metric" ]]; then
-        metric="${tokens[$((index + 1))]:-0}"
-      fi
-    done
-    [[ -n "${iface}" ]] || continue
-    is_real_internet_interface "${iface}" || continue
-    [[ "${iface}" != "${WIFI_INTERFACE}" ]] || continue
-    pick_better_interface "${iface}" "${metric}"
-  done < <(ip -o route show default 2>/dev/null || true)
-
-  if [[ -n "${BEST_IFACE}" ]]; then
-    printf '%s\n' "${BEST_IFACE}"
-    return
-  fi
-
-  for path in /sys/class/net/*; do
-    iface="${path##*/}"
-    is_real_internet_interface "${iface}" || continue
-    [[ "${iface}" != "${WIFI_INTERFACE}" ]] || continue
-    [[ "$(cat "/sys/class/net/${iface}/operstate" 2>/dev/null || true)" == "up" ]] || continue
-    pick_better_interface "${iface}" 999999
-  done
-
-  printf '%s\n' "${BEST_IFACE}"
+  ranked_internet_candidates | head -n 1
 }
 
 # warn_if_concurrent_ap_sta_risky avisa cedo quando WIFI_INTERFACE e
