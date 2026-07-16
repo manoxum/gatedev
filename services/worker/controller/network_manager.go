@@ -80,23 +80,38 @@ func handleWifiManage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "campo 'interface' obrigatorio", http.StatusBadRequest)
 		return
 	}
-
-	_ = os.Remove(nmDropin)
-	reloadOutput, reloadErr := reloadNetworkManagerConfig()
-	if reloadErr != nil {
-		log.Printf("[worker] aviso: 'nmcli general reload conf' falhou; tentando devolver %s mesmo assim: %v (%s)", req.Interface, reloadErr, reloadOutput)
-	}
-	output, err := setDeviceManaged(req.Interface, true)
-	if err != nil {
-		log.Printf("[worker] erro ao rodar 'nmcli device set %s managed yes': %v (%s)", req.Interface, err, output)
-		if reloadErr != nil {
-			http.Error(w, fmt.Sprintf("%s\n%s", strings.TrimSpace(string(reloadOutput)), strings.TrimSpace(string(output))), http.StatusInternalServerError)
-			return
-		}
-		http.Error(w, string(output), http.StatusInternalServerError)
+	if err := manageWifiInterface(req.Interface); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// manageWifiInterface remove o drop-in e devolve a interface ao
+// NetworkManager (que reconecta sozinho as redes salvas). Idempotente:
+// chamavel mesmo quando a placa nunca foi desgerenciada. Usada por
+// handleWifiManage (POST /network/wifi-manage, fluxo de stop/recover
+// do painel) e por unmanageWifiInterfaceIfIdle (compose.go) nos modos
+// que PRESERVAM a associacao Wi-Fi cliente - sem essa segunda chamada,
+// trocar de um modo que desgerencia (ex.: Ethernet para Wi-Fi com a
+// placa ociosa) para um que preserva (Wi-Fi para Wi-Fi) deixava a
+// placa presa "unmanaged"/desconectada para sempre: o NetworkManager e
+// o unico que a reconectaria, e estava proibido de toca-la.
+func manageWifiInterface(iface string) error {
+	_ = os.Remove(nmDropin)
+	reloadOutput, reloadErr := reloadNetworkManagerConfig()
+	if reloadErr != nil {
+		log.Printf("[worker] aviso: 'nmcli general reload conf' falhou; tentando devolver %s mesmo assim: %v (%s)", iface, reloadErr, reloadOutput)
+	}
+	output, err := setDeviceManaged(iface, true)
+	if err != nil {
+		log.Printf("[worker] erro ao rodar 'nmcli device set %s managed yes': %v (%s)", iface, err, output)
+		if reloadErr != nil {
+			return fmt.Errorf("%s\n%s", strings.TrimSpace(string(reloadOutput)), strings.TrimSpace(string(output)))
+		}
+		return fmt.Errorf("%s", strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func reloadNetworkManagerConfig() ([]byte, error) {

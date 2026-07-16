@@ -2,8 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"encoding/json"
-	"net/http"
 	"time"
 )
 
@@ -29,51 +27,6 @@ type hotspotGlobalTraffic struct {
 	LastDownloadCounter int64
 	LastUploadCounter   int64
 	Throttled           bool
-}
-
-type hotspotTrafficResponse struct {
-	DownloadBytes int64   `json:"downloadBytes"`
-	UploadBytes   int64   `json:"uploadBytes"`
-	PeriodStart   string  `json:"periodStart"`
-	PeriodEnd     string  `json:"periodEnd"`
-	Throttled     bool    `json:"throttled"`
-	QuotaBytes    *int64  `json:"quotaBytes"`
-	QuotaPeriod   *string `json:"quotaPeriod"`
-}
-
-// registerHotspotTrafficRoutes so cobre o acumulado global daqui pra
-// frente - o equivalente por dispositivo virou o endpoint de cota por
-// periodo (GET /api/hotspot/devices/{mac}/quota, ver
-// hotspot_device_quota.go), que ja tinha tudo que este endpoint
-// devolvia (bytes usados + teto) e ainda cobre os 3 periodos
-// simultaneos em vez de um so.
-func registerHotspotTrafficRoutes(mux *http.ServeMux, admin *administrator, db *sql.DB) {
-	mux.HandleFunc("GET /api/hotspot/limits/global/traffic", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		traffic, err := ensureGlobalTrafficRow(db)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		limits, err := getGlobalLimits(db)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(globalTrafficResponse(traffic, limits))
-	}))
-}
-
-func globalTrafficResponse(traffic hotspotGlobalTraffic, limits hotspotGlobalLimits) hotspotTrafficResponse {
-	return hotspotTrafficResponse{
-		DownloadBytes: traffic.DownloadBytes,
-		UploadBytes:   traffic.UploadBytes,
-		PeriodStart:   traffic.PeriodStart.Format(time.RFC3339),
-		PeriodEnd:     traffic.PeriodEnd.Format(time.RFC3339),
-		Throttled:     traffic.Throttled,
-		QuotaBytes:    limits.QuotaBytes,
-		QuotaPeriod:   limits.QuotaPeriod,
-	}
 }
 
 // getOrCreateDeviceFwmark garante que o dispositivo tenha uma linha em

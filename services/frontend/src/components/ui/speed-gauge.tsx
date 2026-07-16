@@ -1,5 +1,6 @@
 import GaugeComponent from "react-gauge-component";
 import { cn } from "@/lib/utils";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { pickByteScale, type ByteNature } from "@/components/hotspot/hotspot-limits-types";
 
 export interface SpeedGaugeProps {
@@ -77,23 +78,28 @@ export function SpeedGauge({ valueBps, maxBps, label, size = "lg", className, un
   return (
     <div className={cn("flex flex-col items-center", className)}>
       <div style={{ width: dims.width, height: dims.height }}>
-        <GaugeComponent
-          type="semicircle"
-          value={value}
-          minValue={0}
-          maxValue={max}
-          arc={{ width: dims.arcWidth, padding: 0, cornerRadius: 4, subArcs }}
-          pointer={{ hide: true }}
-          labels={{
-            valueLabel: {
-              hide: true,
-            },
-            tickLabels: {
-              hideMinMax: true,
-              ticks: [],
-            },
-          }}
-        />
+        {/* react-gauge-component reagenda redesenho via ResizeObserver
+            apos o unmount (ref interno nunca e zerado) - isola o crash
+            aqui em vez de derrubar a tela inteira quando isso acontece. */}
+        <ErrorBoundary fallback={<div style={{ width: dims.width, height: dims.height }} />}>
+          <GaugeComponent
+            type="semicircle"
+            value={value}
+            minValue={0}
+            maxValue={max}
+            arc={{ width: dims.arcWidth, padding: 0, cornerRadius: 4, subArcs }}
+            pointer={{ hide: true }}
+            labels={{
+              valueLabel: {
+                hide: true,
+              },
+              tickLabels: {
+                hideMinMax: true,
+                ticks: [],
+              },
+            }}
+          />
+        </ErrorBoundary>
       </div>
       <div className="-mt-3 flex items-baseline gap-1">
         <span className="font-bold text-foreground" style={{ fontSize: dims.valueFont, fontVariantNumeric: "tabular-nums" }}>

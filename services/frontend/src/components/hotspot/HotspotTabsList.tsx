@@ -1,4 +1,4 @@
-import { Ban, History, ScrollText, Sliders, Ticket, UserCog, Wifi } from "lucide-react";
+import { Ban, History, ScrollText, Ticket, UserCog, Wifi } from "lucide-react";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface HotspotTabsListProps {
@@ -14,7 +14,7 @@ interface HotspotTabsListProps {
 // de componente.
 export function HotspotTabsList({ connectedCount, blockedCount }: HotspotTabsListProps) {
   return (
-    <TabsList className="grid h-auto w-full grid-cols-7 sm:inline-grid sm:w-auto">
+    <TabsList className="grid h-auto w-full grid-cols-6 sm:inline-grid sm:w-auto">
       <TabsTrigger value="connected" className="gap-2">
         <Wifi className="h-4 w-4" />
         Conectados
@@ -32,10 +32,6 @@ export function HotspotTabsList({ connectedCount, blockedCount }: HotspotTabsLis
       <TabsTrigger value="known" className="gap-2">
         <History className="h-4 w-4" />
         Todos os dispositivos
-      </TabsTrigger>
-      <TabsTrigger value="limits">
-        <Sliders className="h-4 w-4" />
-        Limites
       </TabsTrigger>
       <TabsTrigger value="profiles">
         <UserCog className="h-4 w-4" />

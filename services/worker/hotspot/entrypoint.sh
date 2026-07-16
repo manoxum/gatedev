@@ -301,17 +301,25 @@ fi
 WIFI_CHANNEL="${WIFI_CHANNEL:-auto}"
 WIFI_FREQ_BAND="${WIFI_FREQ_BAND:-auto}"
 
-# channel.sh: selecao de banda/canal Wi-Fi. interfaces.sh: resolucao/
-# avisos sobre a interface de internet. regulatory.sh: diagnostico do
-# dominio regulatorio Wi-Fi. watchdog.sh: deteccao em tempo real de
-# falha de beacon do create_ap. history.sh: historico de sucesso/falha
-# por banda/canal, usado por channel.sh pra priorizar candidatos.
-# Todos sourced do mesmo diretorio deste script (ver Dockerfile - os
-# seis arquivos vao para /usr/local/bin/). history.sh precisa vir antes
-# de channel.sh, que chama suas funcoes.
+# channel.sh: selecao de banda/canal Wi-Fi. sta_link.sh: estado da
+# associacao Wi-Fi cliente (STA) - sinais vivos do driver, ver o
+# comentario la sobre o falso-negativo do "iw dev link". interfaces.sh:
+# resolucao/avisos sobre a interface de internet. uplink.sh: NAT/
+# uplink virtual bn-uplink e o monitor de troca de fonte ao vivo.
+# regulatory.sh: diagnostico do dominio regulatorio Wi-Fi. watchdog.sh:
+# deteccao em tempo real de falha de beacon do create_ap. history.sh:
+# historico de sucesso/falha por banda/canal, usado por channel.sh pra
+# priorizar candidatos. Todos sourced do mesmo diretorio deste script
+# (ver Dockerfile - os oito arquivos vao para /usr/local/bin/).
+# history.sh precisa vir antes de channel.sh, que chama suas funcoes;
+# sta_link.sh vem depois de channel.sh (usa freq_to_channel);
+# uplink.sh vem depois de interfaces.sh e sta_link.sh (usa funcoes/
+# variaveis dos dois).
 source "$(dirname "$0")/history.sh"
 source "$(dirname "$0")/channel.sh"
+source "$(dirname "$0")/sta_link.sh"
 source "$(dirname "$0")/interfaces.sh"
+source "$(dirname "$0")/uplink.sh"
 source "$(dirname "$0")/regulatory.sh"
 source "$(dirname "$0")/watchdog.sh"
 
@@ -629,7 +637,17 @@ STOPPING=0
 LAST_GOOD_BAND=""
 LAST_GOOD_CHANNEL=""
 
+CLEANUP_DONE=0
+
 cleanup() {
+  # Idempotente: uma parada por sinal roda cleanup duas vezes (trap
+  # INT/TERM chama direto e o trap EXIT chama de novo na saida) - sem a
+  # guarda, todo o encerramento (create_ap --stop, pkill, iptables)
+  # executava em dobro e o log mostrava dois "Encerrando" por parada.
+  if [[ "${CLEANUP_DONE}" -eq 1 ]]; then
+    return
+  fi
+  CLEANUP_DONE=1
   log "Encerrando hotspot em ${WIFI_INTERFACE}."
   stop_beacon_failure_watcher
   # force_stop_create_ap (definida no topo do script, perto de
@@ -698,6 +716,14 @@ start_uplink_monitor
 attempt_hotspot_cycle() {
   local status=0
 
+  # INTERNET_INTERFACE pode ter mudado pelo painel desde que este
+  # processo carregou a configuracao (troca de uplink ao vivo, ver
+  # uplink.sh) - re-le do banco antes de decidir o modo desta
+  # tentativa, senao um retry pos-queda continuaria raciocinando com a
+  # fonte antiga (ex.: esperando uma associacao STA que nao e mais o
+  # uplink).
+  refresh_internet_strategy_from_db
+
   if [[ -n "${LAST_GOOD_BAND}" && -n "${LAST_GOOD_CHANNEL}" ]]; then
     log "Tentando primeiro o canal ${LAST_GOOD_CHANNEL} (${LAST_GOOD_BAND}GHz), que funcionou da ultima vez nesta execucao."
     try_create_ap "${LAST_GOOD_BAND}" "${LAST_GOOD_CHANNEL}" || status=$?
@@ -717,41 +743,48 @@ attempt_hotspot_cycle() {
     return "${status}"
   fi
 
-  # Wi-Fi para Wi-Fi (WIFI_INTERFACE == INTERNET_INTERFACE) com
-  # WIFI_CHANNEL=auto: se a placa ja esta associada como cliente agora,
-  # trava direto no canal/banda dessa associacao e pula a varredura de
-  # candidatos inteira. try_create_ap ja sobrescreve banda/canal pra
-  # bater com a estacao de qualquer forma (ver comentario ali) - rankear/
-  # escanear canais (rank_channels_for_band, via start_hotspot_auto)
-  # so arrisca derrubar essa mesma conexao Wi-Fi cliente (que alimenta o
-  # hotspot) com "iw dev ... scan" antes da primeira tentativa real, sem
-  # nenhum ganho, ja que o resultado do ranking seria descartado mesmo.
-  # Wi-Fi para Wi-Fi NUNCA cai pro caminho de varredura ativa abaixo
-  # (start_hotspot_auto/rank_channels_for_band): "iw dev ... scan"
-  # ativo e bem mais perturbador pra estacao associada do que a
-  # varredura passiva de fundo do NetworkManager (confirmado - foi
-  # exatamente essa varredura ativa, disparada apos sta_current_band_channel
-  # falhar aqui uma vez, que manteve a placa instavel nas tentativas
-  # seguintes) - sem ganho nenhum de qualquer forma, ja que o canal do
-  # AP e sempre forcado pro canal da estacao neste modo (try_create_ap
-  # sobrescreve), nunca escolhido pelo ranking de interferencia. Se
-  # sta_current_band_channel falhar mesmo com toda a paciencia de
-  # sta_link_connected, retorna falha retentavel e deixa o loop de
-  # retry externo (backoff mais longo, sem nenhum scan no meio)
-  # esperar a estacao estabilizar sozinha.
-  if [[ "${WIFI_INTERFACE}" == "${REAL_INTERNET_INTERFACE}" ]]; then
-    local sta_band_channel
-    if sta_band_channel="$(sta_current_band_channel)"; then
-      local sta_band="${sta_band_channel% *}"
-      local sta_channel="${sta_band_channel#* }"
-      log "Wi-Fi para Wi-Fi: ${WIFI_INTERFACE} ja associado em ${sta_band}GHz canal ${sta_channel}; travando nesse canal direto, sem varredura, pra nao arriscar derrubar a propria conexao cliente."
-      status=0
-      try_create_ap "${sta_band}" "${sta_channel}" || status=$?
-    else
-      log "ERRO: nao foi possivel confirmar o canal atual da associacao Wi-Fi cliente de ${WIFI_INTERFACE} mesmo apos aguardar - Wi-Fi para Wi-Fi nao varre canais nessa placa (a varredura ativa so pioraria a instabilidade da propria conexao cliente). Aguardando reconectar antes de tentar de novo."
-      status=1
+  # Placa ja associada como cliente agora (qualquer modo, nao so Wi-Fi
+  # para Wi-Fi): trava direto no canal/banda dessa associacao e pula a
+  # varredura de candidatos inteira. try_create_ap ja sobrescreve
+  # banda/canal pra bater com a estacao de qualquer forma (ver
+  # comentario ali) - rankear/escanear canais (rank_channels_for_band,
+  # via start_hotspot_auto) so arrisca derrubar essa mesma conexao
+  # Wi-Fi cliente com "iw dev ... scan" sem nenhum ganho, ja que o
+  # resultado do ranking seria descartado mesmo. Isso vale igualmente
+  # no modo Ethernet para Wi-Fi com a associacao preservada (ver
+  # unmanageWifiInterfaceIfIdle em services/worker/controller/compose.go):
+  # ali a associacao e o Wi-Fi cliente do usuario, que o hotspot
+  # promete nao derrubar - e pular o scan tambem e o que faz a partida
+  # ser rapida nesse modo.
+  local sta_band_channel
+  if sta_band_channel="$(sta_current_band_channel)"; then
+    local sta_band="${sta_band_channel% *}"
+    local sta_channel="${sta_band_channel#* }"
+    log "${WIFI_INTERFACE} ja associado em ${sta_band}GHz canal ${sta_channel}; travando nesse canal direto, sem varredura, pra nao arriscar derrubar a conexao cliente."
+    status=0
+    try_create_ap "${sta_band}" "${sta_channel}" || status=$?
+    if [[ "${WIFI_INTERFACE}" == "${REAL_INTERNET_INTERFACE}" || "${status}" -eq 0 || "${status}" -eq 2 ]]; then
+      return "${status}"
     fi
-    return "${status}"
+    # Modo nao-W2W: a tentativa travada falhou (ex.: a estacao
+    # desassociou bem no meio) - ainda ha o caminho --no-virt via
+    # varredura normal abaixo, ja que o uplink nao depende desta
+    # associacao.
+    log "AVISO: tentativa travada no canal da estacao falhou; caindo pra varredura normal de canais."
+  elif [[ "${WIFI_INTERFACE}" == "${REAL_INTERNET_INTERFACE}" ]]; then
+    # Wi-Fi para Wi-Fi NUNCA cai pro caminho de varredura ativa abaixo
+    # (start_hotspot_auto/rank_channels_for_band): "iw dev ... scan"
+    # ativo e bem mais perturbador pra estacao associada do que a
+    # varredura passiva de fundo do NetworkManager (confirmado - foi
+    # exatamente essa varredura ativa, disparada apos
+    # sta_current_band_channel falhar aqui uma vez, que manteve a placa
+    # instavel nas tentativas seguintes) - sem ganho nenhum de qualquer
+    # forma, ja que o canal do AP e sempre forcado pro canal da estacao
+    # neste modo. Retorna falha retentavel e deixa o loop de retry
+    # externo (backoff mais longo, sem nenhum scan no meio) esperar a
+    # estacao estabilizar sozinha.
+    log "ERRO: nao foi possivel confirmar o canal atual da associacao Wi-Fi cliente de ${WIFI_INTERFACE} mesmo apos aguardar - Wi-Fi para Wi-Fi nao varre canais nessa placa (a varredura ativa so pioraria a instabilidade da propria conexao cliente). Aguardando reconectar antes de tentar de novo."
+    return 1
   fi
 
   local first_band="${LAST_GOOD_BAND:-${WIFI_FREQ_BAND}}"

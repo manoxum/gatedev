@@ -53,33 +53,17 @@ type rateLimit struct {
 // effectiveDeviceRates decide a taxa que deve valer agora para um
 // dispositivo: sempre a taxa configurada (download/upload), Value nil
 // (sem classe HTB dedicada, so contagem) se nao houver nenhuma. Taxa e
-// independente do LimitType (requisito confirmado com o admin) - ao
-// contrario do limite global, cota de dispositivo/perfil nunca throttla
-// mais: estourar um periodo configurado e bloqueio rigido (ver
-// reconcileDeviceQuota em hotspot_device_quota_store.go), nao reducao
-// de taxa.
+// independente do LimitType (requisito confirmado com o admin) - cota
+// de dispositivo/perfil nunca throttla: estourar um periodo
+// configurado e bloqueio rigido (ver reconcileDeviceQuota em
+// hotspot_device_quota_store.go), nao reducao de taxa.
 func effectiveDeviceRates(limits hotspotLimits) (download, upload rateLimit) {
 	return rateLimit{limits.DownloadRateValue, limits.DownloadRateUnit},
 		rateLimit{limits.UploadRateValue, limits.UploadRateUnit}
 }
 
-func effectiveGlobalRates(limits hotspotGlobalLimits, traffic hotspotGlobalTraffic) (download, upload rateLimit) {
-	if traffic.Throttled {
-		if limits.QuotaThrottleDownloadValue != nil || limits.QuotaThrottleUploadValue != nil {
-			return rateLimit{limits.QuotaThrottleDownloadValue, limits.QuotaThrottleDownloadUnit},
-				rateLimit{limits.QuotaThrottleUploadValue, limits.QuotaThrottleUploadUnit}
-		}
-	}
-	return rateLimit{limits.DownloadRateValue, limits.DownloadRateUnit},
-		rateLimit{limits.UploadRateValue, limits.UploadRateUnit}
-}
-
 type shapingGlobalPayload struct {
-	Interface         string   `json:"interface"`
-	DownloadRateValue *int     `json:"downloadRateValue"`
-	DownloadRateUnit  rateUnit `json:"downloadRateUnit"`
-	UploadRateValue   *int     `json:"uploadRateValue"`
-	UploadRateUnit    rateUnit `json:"uploadRateUnit"`
+	Interface string `json:"interface"`
 }
 
 type shapingDevicePayload struct {
@@ -93,40 +77,18 @@ type shapingDevicePayload struct {
 	UploadRateUnit    rateUnit `json:"uploadRateUnit"`
 }
 
-func applyGlobalShaping(ctx context.Context, worker *workerClient, iface string, download, upload rateLimit) error {
-	return worker.call(ctx, http.MethodPost, "/hotspot/shaping/global", shapingGlobalPayload{
-		Interface:         iface,
-		DownloadRateValue: download.Value,
-		DownloadRateUnit:  download.Unit,
-		UploadRateValue:   upload.Value,
-		UploadRateUnit:    upload.Unit,
-	}, nil)
-}
-
-// applyGlobalShapingLive aplica o limite global assim que o admin
-// salva a configuracao, sem esperar o proximo ciclo de reconciliacao -
-// best-effort (so loga se o hotspot estiver desligado/inacessivel, a
-// config ja foi persistida no Postgres de qualquer forma).
-func applyGlobalShapingLive(ctx context.Context, db *sql.DB, worker *workerClient) {
-	iface, err := hotspotWifiInterface(ctx, db)
-	if err != nil {
-		log.Printf("[backend] limite global persistido, mas nao foi possivel ler WIFI_INTERFACE: %v", err)
-		return
-	}
-	limits, err := getGlobalLimits(db)
-	if err != nil {
-		log.Printf("[backend] limite global persistido, mas falha ao reler do Postgres: %v", err)
-		return
-	}
-	traffic, err := ensureGlobalTrafficRow(db)
-	if err != nil {
-		log.Printf("[backend] limite global persistido, mas falha ao ler acumulado do periodo: %v", err)
-		return
-	}
-	download, upload := effectiveGlobalRates(limits, traffic)
-	if err := applyGlobalShaping(ctx, worker, iface, download, upload); err != nil {
-		log.Printf("[backend] limite global persistido, mas aplicacao ao vivo falhou: %v", err)
-	}
+// applyGlobalShaping garante so a contagem agregada de todo o hotspot
+// (regras iptables bn-global-up/down) - nao existe mais teto/cota
+// global (removido, ver RULE.md), o admin so configura taxa/cota por
+// dispositivo ou perfil (hotspot_device_limits.go/hotspot_profiles.go).
+// Mantida (chamada todo ciclo por reconcileGlobal e no boot do hotspot
+// por reapplyHotspotShaping) so para alimentar o velocimetro/grafico
+// geral (useGlobalStats/useGlobalSpeedHistory no frontend) - sem essa
+// reaplicacao periodica, se as regras se perdessem uma vez (ex.:
+// container do hotspot reiniciado), o painel travava em 0bps
+// indefinidamente.
+func applyGlobalShaping(ctx context.Context, worker *workerClient, iface string) error {
+	return worker.call(ctx, http.MethodPost, "/hotspot/shaping/global", shapingGlobalPayload{Interface: iface}, nil)
 }
 
 // ensureDeviceShaping calcula a taxa efetiva do dispositivo e manda o
@@ -175,33 +137,22 @@ func applyDeviceShapingLive(ctx context.Context, db *sql.DB, worker *workerClien
 	}
 }
 
-// reapplyHotspotShaping recria o chain/qdiscs globais depois que o
-// hotspot sobe (mesmo retry com backoff de reapplyHotspotBlocklist,
-// ja que ap0/bn-uplink podem demorar alguns segundos para existir). As
-// classes por dispositivo sao recriadas naturalmente pelo loop de
-// reconciliacao assim que cada cliente conectado reaparecer.
-func reapplyHotspotShaping(ctx context.Context, db *sql.DB, worker *workerClient, iface string) {
-	limits, err := getGlobalLimits(db)
-	if err != nil {
-		log.Printf("[backend] falha ao ler limite global do hotspot: %v", err)
-		return
-	}
-	traffic, err := ensureGlobalTrafficRow(db)
-	if err != nil {
-		log.Printf("[backend] falha ao ler acumulado global do hotspot: %v", err)
-		return
-	}
-	download, upload := effectiveGlobalRates(limits, traffic)
-
+// reapplyHotspotShaping recria a contagem agregada global (chain/regras
+// bn-global-up/down) depois que o hotspot sobe (mesmo retry com backoff
+// de reapplyHotspotBlocklist, ja que ap0/bn-uplink podem demorar alguns
+// segundos para existir). As classes por dispositivo sao recriadas
+// naturalmente pelo loop de reconciliacao assim que cada cliente
+// conectado reaparecer.
+func reapplyHotspotShaping(ctx context.Context, worker *workerClient, iface string) {
 	var lastErr error
 	for attempt := 0; attempt < 6; attempt++ {
-		lastErr = applyGlobalShaping(ctx, worker, iface, download, upload)
+		lastErr = applyGlobalShaping(ctx, worker, iface)
 		if lastErr == nil {
 			break
 		}
 		time.Sleep(time.Second)
 	}
 	if lastErr != nil {
-		log.Printf("[backend] reaplicacao do shaping global falhou: %v", lastErr)
+		log.Printf("[backend] reaplicacao da contagem global falhou: %v", lastErr)
 	}
 }

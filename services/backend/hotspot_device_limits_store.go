@@ -2,10 +2,10 @@ package main
 
 import "database/sql"
 
-// normalizeDeviceLimitUnits e o equivalente de normalizeLimitUnits
-// (hotspot_global_limits.go) para o shape novo - nome diferente de
-// proposito, os dois structs (hotspotLimits/hotspotGlobalLimits) nao
-// sao mais o mesmo tipo.
+// normalizeDeviceLimitUnits preenche "mbit"/"gbyte" nas unidades que
+// vierem vazias no corpo do PATCH (frontend antigo, ou campo omitido) -
+// garante que nunca violamos o CHECK de unidade nem gravamos "" no
+// Postgres.
 func normalizeDeviceLimitUnits(limits hotspotLimits) hotspotLimits {
 	if limits.DownloadRateUnit == "" {
 		limits.DownloadRateUnit = rateUnitMbit

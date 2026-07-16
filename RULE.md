@@ -169,9 +169,22 @@ Regras:
   interface dummy estável (`BINDNET_UPLINK_INTERFACE`, padrão
   `bn-uplink`) e instala regras próprias em chains `BINDNET-HOTSPOT` de
   `FORWARD`/`POSTROUTING` para alimentar esse uplink virtual pela fonte
-  real. No modo `auto`, um monitor (`UPLINK_MONITOR_INTERVAL`, padrão
-  10s) reavalia a melhor interface em tempo real e troca somente essas
-  regras, sem derrubar/recriar o AP. `INTERNET_INTERFACE` pode ser a
+  real. Um monitor de uplink (`UPLINK_MONITOR_INTERVAL`, padrão 10s,
+  ver `services/worker/hotspot/uplink.sh`) roda **sempre** (não só no
+  modo `auto`): além de reavaliar a melhor interface em `auto`, ele lê
+  `INTERNET_INTERFACE` direto do banco a cada ciclo e, quando o painel
+  troca a fonte (quick-switch do card de resumo → `POST
+  /api/hotspot/uplink`, que só grava a chave), alterna **somente as
+  regras de NAT/forward, ao vivo, sem derrubar/recriar o AP** — os
+  clientes conectados não caem. A única troca que exige reiniciar o
+  hotspot é passar a fonte para a própria placa Wi-Fi
+  (`INTERNET_INTERFACE == WIFI_INTERFACE`) enquanto o AP está em
+  `--no-virt` (sem associação de estação): sem estação não há uplink
+  Wi-Fi possível, o monitor loga um aviso e mantém a fonte atual até
+  um restart reassociar a placa. `attempt_hotspot_cycle` também relê
+  essa chave do banco antes de cada rodada
+  (`refresh_internet_strategy_from_db`), para um retry pós-queda já
+  raciocinar com a fonte mais recente. `INTERNET_INTERFACE` pode ser a
   **mesma** interface de `WIFI_INTERFACE` (hotspot e saída de internet
   pela mesma placa física, modo AP+STA concorrente no mesmo rádio) — o
   hotspot detecta esse caso e loga um aviso citando se `iw phy<N>
@@ -219,26 +232,30 @@ Regras:
   se aplica quando `WIFI_INTERFACE` ≠ `INTERNET_INTERFACE` (ex.:
   hotspot pela Wi-Fi com internet vindo de uma interface cabeada) —
   `--no-virt` nesse caso é comportamento correto e esperado.
-  **`sta_link_connected`** (`channel.sh`), usada por essa checagem em
+  **`sta_link_connected`** (`sta_link.sh`), usada por essa checagem em
   `try_create_ap` e por `sta_current_band_channel` (o "trava direto no
-  canal" acima também depende dela), tolera blips momentâneos de
-  associação: até `STA_LINK_CHECK_ATTEMPTS` leituras de `iw dev ...
-  link` (padrão 20, a cada `STA_LINK_CHECK_INTERVAL_SECONDS`, padrão
-  0.4s — env do container, sem equivalente no painel, mesmo padrão de
+  canal" acima também depende dela), lê o **estado vivo do driver**, e
+  não a saída de `iw dev ... link`: `iw dev ... station dump` (tabela
+  de estações do mac80211 — em modo managed a única entrada possível é
+  o AP da associação atual) confirma a associação, e `iw dev ... info`
+  (linha `channel`, o chanctx sintonizado) dá banda/canal; `iw dev
+  link` fica só como sinal alternativo. Motivo: `iw dev link` responde
+  a partir do **cache de resultados de varredura** do cfg80211, e foi
+  confirmado ao vivo (2026-07-16, iwlwifi/AX211, cruzando
+  `journalctl` do NetworkManager/`wpa_supplicant` com o log do
+  container) que ele reporta "Not connected" por **minutos** seguidos
+  com a associação real de pé o tempo todo — foi exatamente isso que
+  prendia o Wi-Fi-para-Wi-Fi no loop "não foi possível confirmar o
+  canal atual da associação" até desistir. Além do sinal confiável,
+  `sta_link_connected` ainda tolera reconexões em andamento: até
+  `STA_LINK_CHECK_ATTEMPTS` leituras (padrão 20, a cada
+  `STA_LINK_CHECK_INTERVAL_SECONDS`, padrão 0.4s — env do container,
+  sem equivalente no painel, mesmo padrão de
   `HOTSPOT_BEACON_FAILURE_THRESHOLD` em `watchdog.sh`) antes de
-  considerar "não associada" de verdade — confirmado por polling
-  externo ao container que a associação pode piscar por vários
-  segundos (o único rádio físico saindo do canal pra uma varredura de
-  fundo que o próprio NetworkManager/`wpa_supplicant` dispara
-  periodicamente numa interface já associada, ex.: pra avaliar roaming
-  entre APs do mesmo SSID) sem representar uma queda real — o usuário
-  nunca percebe nada, só a leitura pontual de `iw dev link` fica
-  ambígua durante a janela. A paciência é alta de propósito: o custo
-  de esperar mais um pouco aqui é bem menor que cair pro loop de retry
-  externo (backoff de 3s/6s/9s.../`HOTSPOT_RESTART_BACKOFF_SECONDS`
-  por tentativa) só pra repetir a mesma checagem — sem isso, o hotspot
-  Wi-Fi-para-Wi-Fi podia demorar dezenas de segundos (ou falhar
-  repetidamente) mesmo com o cliente Wi-Fi genuinamente estável.
+  considerar "não associada" de verdade, porque o custo de esperar
+  mais um pouco aqui é bem menor que cair pro loop de retry externo
+  (backoff de 3s/6s/9s.../`HOTSPOT_RESTART_BACKOFF_SECONDS` por
+  tentativa) só pra repetir a mesma checagem.
   **Essa paciência só se aplica quando `WIFI_INTERFACE` também é a
   fonte de internet** (Wi-Fi para Wi-Fi de verdade) — em qualquer
   outro modo (ex.: Ethernet para Wi-Fi), `sta_link_connected` faz uma
@@ -354,31 +371,40 @@ scripts tinham, só que dentro do container privilegiado em vez de
      job `migration` nem o `docker-compose.yml` agregador.
   2. O `worker`, bem em cima do `docker exec ... start`
      (`unmanageWifiInterfaceIfIdle`, `services/worker/controller/compose.go`),
-     desgerencia `WIFI_INTERFACE` no NetworkManager **exceto** quando
-     `WIFI_INTERFACE == INTERNET_INTERFACE` (Wi-Fi para Wi-Fi de
-     verdade, AP+STA concorrente) — nesse caso a placa fica sempre
-     gerenciada, **incondicionalmente**, sem checar se está associada
-     como cliente Wi-Fi agora. Essa checagem já existiu (só pulava o
-     desgerenciamento quando associada *no instante da checagem*) e foi
-     removida de propósito: é uma corrida real — pegar a placa
-     momentaneamente sem associação (ex.: o NetworkManager ainda no
-     meio da própria reconexão logo após um restart) desgerenciava/
-     desconectava mesmo assim, travando a placa desconectada **para
-     sempre** dali em diante, já que o NetworkManager é a única coisa
-     que a reconectaria sozinha e passa a estar desligado — confirmado
-     ao vivo (funcionava uma vez após reconexão manual, e voltava a
-     falhar sozinho no ciclo de restart seguinte, sempre pela mesma
-     causa). Qualquer outra combinação (ex.: internet via Ethernet)
-     sempre desgerencia a placa antes do hotspot subir, mesmo que ela
-     esteja transitoriamente associada a alguma rede Wi-Fi do usuário
-     sem relação com o hotspot — deixar o NetworkManager "dono" dela
-     nesse caso o faz competir pelo rádio com o `hostapd` (escaneando/
-     tentando reassociar a mesma placa enquanto o AP tenta usá-la),
-     derrubando o beacon. O container `hotspot` delega ao `create_ap` a
-     criação da interface AP virtual (`ap0`) quando o adaptador suporta
-     AP+STA. A fonte de internet entregue ao `create_ap` é sempre o
-     uplink virtual `BINDNET_UPLINK_INTERFACE`, alimentado por regras
-     Bindnet de NAT/forward a partir da interface real configurada.
+     decide quem fica dono de `WIFI_INTERFACE` no NetworkManager:
+     - `WIFI_INTERFACE == INTERNET_INTERFACE` (Wi-Fi para Wi-Fi):
+       a placa fica gerenciada **incondicionalmente**, sem checar se
+       está associada agora — checar seria uma corrida real (pegar a
+       placa momentaneamente sem associação durante uma reconexão
+       desgerenciava mesmo assim, travando-a desconectada **para
+       sempre**, já que só o NetworkManager a reconectaria; confirmado
+       ao vivo). Além de não desgerenciar, o worker **re-gerencia**
+       (`manageWifiInterface`, idempotente — remove o drop-in e roda
+       `managed yes`): sem isso, trocar de um modo que desgerenciou a
+       placa (ex.: Ethernet para Wi-Fi com a placa ociosa) para Wi-Fi
+       para Wi-Fi deixava o drop-in órfão e a placa presa "unmanaged".
+     - Placas **diferentes** com a placa Wi-Fi **associada como
+       cliente** (`interfaceAssociated`): a associação é preservada
+       (placa continua gerenciada; mesmo `manageWifiInterface`
+       idempotente). O hotspot sobe numa `ap0` virtual travada no
+       canal da estação — mesma topologia de rádio do Wi-Fi para
+       Wi-Fi, que comprovadamente convive com o NetworkManager. É o
+       que garante que **partilhar internet do Ethernet não desconecta
+       o Wi-Fi cliente do usuário nem o faz "sumir do sistema"**
+       (device unmanaged desaparece do menu de rede do desktop).
+     - Placas diferentes **sem associação**: desgerencia/desconecta
+       como antes — o AP vai subir em `--no-virt` na placa física
+       inteira, e deixá-la gerenciada faria o NetworkManager competir
+       pelo rádio com o `hostapd` (escaneando/tentando reassociar),
+       derrubando o beacon. Corrida residual (associação cair entre a
+       checagem e o `create_ap`): o watchdog de beacon é a rede de
+       segurança, e o NetworkManager reassociando devolve o caminho
+       preservado na tentativa seguinte.
+     O container `hotspot` delega ao `create_ap` a criação da
+     interface AP virtual (`ap0`) quando há estação a preservar. A
+     fonte de internet entregue ao `create_ap` é sempre o uplink
+     virtual `BINDNET_UPLINK_INTERFACE`, alimentado por regras Bindnet
+     de NAT/forward a partir da interface real configurada.
 - `POST /api/hotspot/stop` desfaz exatamente o inverso, na ordem
   inversa:
   1. Para `hotspot` + `dns-provider` (`docker stop`, via `worker`) —
@@ -510,8 +536,9 @@ scripts tinham, só que dentro do container privilegiado em vez de
   momento da chamada.
 - **Ordem de resolução por dispositivo é sempre perfil, a menos que o
   perfil seja `custom`** (nunca override > perfil como um fallback
-  genérico, e nunca cai para `hotspot_global_limits` — o limite global
-  já é uma camada HTB separada e sempre ativa):
+  genérico — não existe mais um limite global independente de
+  perfil/dispositivo, removido por não fazer mais sentido com limite
+  sempre por dispositivo ou perfil selecionado):
   - `effectiveDeviceLimits` (`hotspot_profiles_apply.go`): resolve o
     perfil vinculado ao MAC; se `limitType != "custom"`, os valores do
     perfil valem inteiros (um override antigo em `hotspot_device_limits`

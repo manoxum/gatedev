@@ -2,7 +2,7 @@ import { RATE_UNIT_LABELS } from "@/components/hotspot/hotspot-limits-types";
 
 // Opções do seletor de unidade de taxa/tamanho: bits (Kb/Mb/Gb) e
 // bytes (KB/MB/GB) - ver RateUnit em hotspot-limits-types.ts. Usado
-// tanto nos campos de Taxa/Cota (HotspotLimitsForm.tsx) quanto na
+// tanto nos campos de Taxa/Cota de dispositivo/perfil quanto na
 // quantidade da recarga e no extrato de crédito (device-detail/).
 export function RateUnitOptions() {
   return (

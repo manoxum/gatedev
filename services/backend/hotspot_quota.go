@@ -42,11 +42,11 @@ func recordDeviceUsage(db *sql.DB, mac string, downloadCounter, uploadCounter ui
 }
 
 // recordGlobalUsage e o equivalente global de recordDeviceUsage -
-// devolve os deltas (usados pra alimentar o velocimetro/grafico geral,
-// ver reconcileGlobalUsage em hotspot_usage_sampling.go) alem de
-// acumular download_bytes/upload_bytes (colunas usadas de verdade aqui,
-// ao contrario das equivalentes por dispositivo - ver comentario em
-// recordDeviceUsage).
+// devolve os deltas usados pra alimentar o velocimetro/grafico geral
+// (ver reconcileGlobalUsage em hotspot_usage_sampling.go). Ainda
+// acumula download_bytes/upload_bytes por compatibilidade com a coluna
+// existente, mas nada mais le esses dois campos (o limite/cota global
+// foi removido - ver RULE.md).
 func recordGlobalUsage(db *sql.DB, downloadCounter, uploadCounter uint64) (deltaDown, deltaUp int64, err error) {
 	traffic, err := ensureGlobalTrafficRow(db)
 	if err != nil {
@@ -81,27 +81,4 @@ func periodInterval(period string) string {
 	default:
 		return "1 day"
 	}
-}
-
-func resetGlobalPeriodIfExpired(db *sql.DB, quotaPeriod string) error {
-	_, err := db.Exec(`
-		UPDATE hotspot_global_traffic
-		SET download_bytes = 0, upload_bytes = 0, throttled = false,
-		    period_start = CURRENT_TIMESTAMP,
-		    period_end = CURRENT_TIMESTAMP + interval '` + periodInterval(quotaPeriod) + `'
-		WHERE id = 'global' AND period_end <= CURRENT_TIMESTAMP
-	`)
-	return err
-}
-
-func setGlobalThrottled(db *sql.DB, throttled bool) error {
-	_, err := db.Exec(`UPDATE hotspot_global_traffic SET throttled = $1, updated_at = CURRENT_TIMESTAMP WHERE id = 'global'`, throttled)
-	return err
-}
-
-func globalQuotaExceeded(limits hotspotGlobalLimits, traffic hotspotGlobalTraffic) bool {
-	if limits.QuotaBytes == nil {
-		return false
-	}
-	return traffic.DownloadBytes+traffic.UploadBytes >= *limits.QuotaBytes
 }

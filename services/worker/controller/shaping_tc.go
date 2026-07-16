@@ -7,11 +7,13 @@ import (
 	"strings"
 )
 
-// noLimitCeilMbps e o teto nominal usado quando nao ha limite Mbps
-// configurado (global ou por dispositivo) - alto o bastante para nunca
-// ser o fator limitante num hotspot domestico real, mas mantendo a
-// hierarquia HTB sempre presente (evita ter que criar/destruir qdiscs
-// condicionalmente a cada mudanca de configuracao).
+// noLimitCeilMbps e o teto nominal da classe pai 1:1 (sempre fixo -
+// nao ha mais teto global configuravel, so por dispositivo/perfil) e o
+// usado quando um dispositivo nao tem taxa Mbps configurada - alto o
+// bastante para nunca ser o fator limitante num hotspot domestico
+// real, mas mantendo a hierarquia HTB sempre presente (evita ter que
+// criar/destruir qdiscs condicionalmente a cada mudanca de
+// configuracao).
 const noLimitCeilMbps = 10000
 
 // minGuaranteedMbps e a taxa minima garantida (rate) de qualquer
@@ -21,8 +23,9 @@ const minGuaranteedMbps = 1
 
 // ensureRootQdisc garante a hierarquia HTB minima em uma interface:
 // qdisc raiz (default 1:999, catch-all para quem nao tem classe
-// dedicada) + classe pai 1:1 (teto global) + classe default 1:999. So
-// cria a qdisc raiz quando ela ainda nao existe (ver hasHTBRootQdisc) -
+// dedicada) + classe pai 1:1 (teto fixo noLimitCeilMbps, so serve de
+// guarda-chuva - nao ha mais teto global configuravel) + classe default
+// 1:999. So cria a qdisc raiz quando ela ainda nao existe (ver hasHTBRootQdisc) -
 // "tc qdisc replace" NAO e idempotente para htb: a primeira chamada
 // cria normalmente, mas qualquer chamada seguinte falha com "Error:
 // Change operation not supported by specified qdisc." (confirmado ao
@@ -59,20 +62,6 @@ func hasHTBRootQdisc(iface string) bool {
 		return false
 	}
 	return strings.Contains(string(output), "qdisc htb 1: root")
-}
-
-// updateRootCeil atualiza so o teto da classe pai 1:1 (limite global)
-// sem recriar qdisc/classe default - chamado sempre que o admin muda o
-// limite global, ou com noLimitCeilMbps quando ele remove o limite.
-func updateRootCeil(iface string, ceilValue int, ceilUnit string) error {
-	if ceilValue <= 0 || ceilUnit == "" {
-		ceilValue, ceilUnit = noLimitCeilMbps, rateUnitMbit
-	}
-	if err := runTC("class", "replace", "dev", iface, "parent", "1:", "classid", "1:1",
-		"htb", "rate", rate(ceilValue, ceilUnit), "ceil", rate(ceilValue, ceilUnit)); err != nil {
-		return fmt.Errorf("atualizar teto global em %s: %w", iface, err)
-	}
-	return nil
 }
 
 // deviceClassID monta o classid tc (major:minor) de um fwmark - o

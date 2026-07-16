@@ -9,8 +9,6 @@ REAL_INTERNET_INTERFACE=""
 BINDNET_UPLINK_INTERFACE="${BINDNET_UPLINK_INTERFACE:-bn-uplink}"
 CREATE_AP_INTERNET_INTERFACE="${BINDNET_UPLINK_INTERFACE}"
 UPLINK_MONITOR_INTERVAL="${UPLINK_MONITOR_INTERVAL:-10}"
-UPLINK_FILTER_CHAIN="BINDNET-HOTSPOT"
-UPLINK_NAT_CHAIN="BINDNET-HOTSPOT"
 
 # resolve_internet_interface so age quando INTERNET_INTERFACE=auto -
 # mesma filosofia de WIFI_CHANNEL/WIFI_FREQ_BAND: "auto" e um valor
@@ -171,129 +169,7 @@ validate_real_internet_interface() {
   fi
 }
 
-ensure_iptables_chain() {
-  local table="$1"
-  local chain="$2"
-  if [[ -n "${table}" ]]; then
-    iptables -w -t "${table}" -N "${chain}" >/dev/null 2>&1 || true
-  else
-    iptables -w -N "${chain}" >/dev/null 2>&1 || true
-  fi
-}
-
-ensure_iptables_jump() {
-  local table="$1"
-  local parent="$2"
-  local chain="$3"
-  if [[ -n "${table}" ]]; then
-    if ! iptables -w -t "${table}" -C "${parent}" -j "${chain}" >/dev/null 2>&1; then
-      iptables -w -t "${table}" -I "${parent}" 1 -j "${chain}"
-    fi
-  elif ! iptables -w -C "${parent}" -j "${chain}" >/dev/null 2>&1; then
-    iptables -w -I "${parent}" 1 -j "${chain}"
-  fi
-}
-
-remove_iptables_jump() {
-  local table="$1"
-  local parent="$2"
-  local chain="$3"
-  if [[ -n "${table}" ]]; then
-    while iptables -w -t "${table}" -C "${parent}" -j "${chain}" >/dev/null 2>&1; do
-      iptables -w -t "${table}" -D "${parent}" -j "${chain}" >/dev/null 2>&1 || break
-    done
-  else
-    while iptables -w -C "${parent}" -j "${chain}" >/dev/null 2>&1; do
-      iptables -w -D "${parent}" -j "${chain}" >/dev/null 2>&1 || break
-    done
-  fi
-}
-
-ensure_bindnet_uplink_chains() {
-  ensure_iptables_chain "" "${UPLINK_FILTER_CHAIN}"
-  ensure_iptables_chain "nat" "${UPLINK_NAT_CHAIN}"
-  ensure_iptables_jump "" "FORWARD" "${UPLINK_FILTER_CHAIN}"
-  ensure_iptables_jump "nat" "POSTROUTING" "${UPLINK_NAT_CHAIN}"
-}
-
-apply_bindnet_uplink_rules() {
-  local iface="$1"
-
-  is_real_internet_interface "${iface}" || return 1
-  ensure_bindnet_uplink_chains
-
-  iptables -w -F "${UPLINK_FILTER_CHAIN}"
-  iptables -w -t nat -F "${UPLINK_NAT_CHAIN}"
-  iptables -w -A "${UPLINK_FILTER_CHAIN}" -s "${HOTSPOT_CIDR}" -o "${iface}" -j ACCEPT
-  iptables -w -A "${UPLINK_FILTER_CHAIN}" -i "${iface}" -d "${HOTSPOT_CIDR}" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-  iptables -w -t nat -A "${UPLINK_NAT_CHAIN}" -s "${HOTSPOT_CIDR}" -o "${iface}" -j MASQUERADE
-
-  REAL_INTERNET_INTERFACE="${iface}"
-  INTERNET_INTERFACE="${iface}"
-  local interface_display="${REAL_INTERNET_INTERFACE}"
-  [[ "${INTERNET_STRATEGY}" == "auto" ]] && interface_display="auto (${REAL_INTERNET_INTERFACE})"
-  log "Fonte real de internet do hotspot: ${interface_display}; create_ap recebe uplink virtual estavel ${CREATE_AP_INTERNET_INTERFACE}."
-}
-
-setup_bindnet_virtual_uplink() {
-  validate_real_internet_interface
-
-  if ! ip link show "${BINDNET_UPLINK_INTERFACE}" >/dev/null 2>&1; then
-    ip link add "${BINDNET_UPLINK_INTERFACE}" type dummy
-  fi
-  ip link set "${BINDNET_UPLINK_INTERFACE}" up
-  sysctl -w net.ipv4.ip_forward=1 >/dev/null
-
-  if ! apply_bindnet_uplink_rules "${REAL_INTERNET_INTERFACE}"; then
-    log "ERRO: nao foi possivel aplicar NAT/forward para ${REAL_INTERNET_INTERFACE}."
-    exit 1
-  fi
-}
-
-start_uplink_monitor() {
-  if [[ "${INTERNET_STRATEGY}" != "auto" ]]; then
-    return
-  fi
-
-  (
-    local current="${REAL_INTERNET_INTERFACE}"
-    local detected=""
-
-    while true; do
-      sleep "${UPLINK_MONITOR_INTERVAL}"
-      detected="$(best_internet_interface)"
-      if [[ -z "${detected}" ]]; then
-        log "AVISO: monitor auto nao encontrou interface de internet candidata; mantendo ${current}."
-        continue
-      fi
-      if [[ "${detected}" == "${current}" ]]; then
-        continue
-      fi
-      if apply_bindnet_uplink_rules "${detected}"; then
-        log "Monitor auto alternou a fonte de internet de ${current} para ${detected} sem reiniciar o hotspot."
-        current="${detected}"
-      else
-        log "AVISO: monitor auto detectou ${detected}, mas nao conseguiu aplicar regras; mantendo ${current}."
-      fi
-    done
-  ) &
-  UPLINK_MONITOR_PID=$!
-  log "Monitor automatico de internet ativo a cada ${UPLINK_MONITOR_INTERVAL}s."
-}
-
-cleanup_bindnet_uplink() {
-  if [[ -n "${UPLINK_MONITOR_PID:-}" ]]; then
-    kill "${UPLINK_MONITOR_PID}" >/dev/null 2>&1 || true
-    wait "${UPLINK_MONITOR_PID}" >/dev/null 2>&1 || true
-    UPLINK_MONITOR_PID=""
-  fi
-
-  remove_iptables_jump "" "FORWARD" "${UPLINK_FILTER_CHAIN}"
-  remove_iptables_jump "nat" "POSTROUTING" "${UPLINK_NAT_CHAIN}"
-  iptables -w -F "${UPLINK_FILTER_CHAIN}" >/dev/null 2>&1 || true
-  iptables -w -X "${UPLINK_FILTER_CHAIN}" >/dev/null 2>&1 || true
-  iptables -w -t nat -F "${UPLINK_NAT_CHAIN}" >/dev/null 2>&1 || true
-  iptables -w -t nat -X "${UPLINK_NAT_CHAIN}" >/dev/null 2>&1 || true
-
-  ip link delete "${BINDNET_UPLINK_INTERFACE}" >/dev/null 2>&1 || true
-}
+# As funcoes de NAT/uplink virtual e o monitor de troca ao vivo
+# (apply_bindnet_uplink_rules, setup_bindnet_virtual_uplink,
+# start_uplink_monitor, cleanup_bindnet_uplink etc.) moraram aqui ate
+# serem extraidas para uplink.sh - ver o comentario no topo de la.

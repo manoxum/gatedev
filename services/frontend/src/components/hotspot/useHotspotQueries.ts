@@ -3,9 +3,7 @@ import { api } from "@/lib/api";
 import type { HotspotBlockedDevice } from "@/components/hotspot/HotspotBlocklistCard";
 import type { HotspotBlockReason, HotspotClient } from "@/components/hotspot/HotspotClientsCard";
 import type {
-  HotspotGlobalLimits,
   HotspotDeviceLimitsResponse,
-  HotspotTraffic,
   HotspotDeviceQuotaPeriodUsage,
 } from "@/components/hotspot/hotspot-limits-types";
 import type { HotspotCredit, HotspotCreditHistoryEntry } from "@/components/hotspot/hotspot-credit-types";
@@ -68,21 +66,6 @@ export function useHotspotQueries() {
   });
 
   return { status, config, interfaces, clients, blocklist, knownDevices };
-}
-
-export function useGlobalLimits() {
-  return useQuery<HotspotGlobalLimits>({
-    queryKey: ["hotspot", "limits", "global"],
-    queryFn: () => api.get<HotspotGlobalLimits>("/hotspot/limits/global"),
-  });
-}
-
-export function useGlobalTraffic() {
-  return useQuery<HotspotTraffic>({
-    queryKey: ["hotspot", "limits", "global", "traffic"],
-    queryFn: () => api.get<HotspotTraffic>("/hotspot/limits/global/traffic"),
-    refetchInterval: 15000,
-  });
 }
 
 // Sempre os limites EFETIVOS (herdados do perfil, ou o override do

@@ -24,11 +24,7 @@ func registerShapingRoutes(mux *http.ServeMux) {
 }
 
 type shapingGlobalRequest struct {
-	Interface         string `json:"interface"`
-	DownloadRateValue *int   `json:"downloadRateValue"`
-	DownloadRateUnit  string `json:"downloadRateUnit"`
-	UploadRateValue   *int   `json:"uploadRateValue"`
-	UploadRateUnit    string `json:"uploadRateUnit"`
+	Interface string `json:"interface"`
 }
 
 type shapingDeviceRequest struct {
@@ -47,10 +43,14 @@ type shapingStatsResponse struct {
 	UploadBytes   uint64 `json:"uploadBytes"`
 }
 
-// handleShapingGlobal aplica (ou remove, se os campos vierem nil) o
-// teto global de download/upload - download e limitado na saida da
-// interface ap0 (rumo ao cliente), upload na saida do uplink (rumo a
-// internet).
+// handleShapingGlobal garante so a contagem agregada de todo o hotspot
+// (regras iptables bn-global-up/down, sem casar por MAC/IP) - nao
+// existe mais teto de banda global (removido, taxa/cota agora e so por
+// dispositivo ou perfil, ver RULE.md e handleShapingDevice). Reaplicada
+// todo ciclo pelo backend (reconcileGlobal) so pra alimentar o
+// velocimetro/grafico geral do frontend (useGlobalStats/
+// useGlobalSpeedHistory), que le esses contadores via
+// GET /hotspot/shaping/stats sem mac.
 func handleShapingGlobal(w http.ResponseWriter, r *http.Request) {
 	var req shapingGlobalRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Interface == "" {
@@ -64,24 +64,6 @@ func handleShapingGlobal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := ensureShapingChain(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := ensureRootQdisc(apIface); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := ensureRootQdisc(uplinkIface); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	downloadValue, downloadUnit := rateOrZero(req.DownloadRateValue, req.DownloadRateUnit)
-	if err := updateRootCeil(apIface, downloadValue, downloadUnit); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	uploadValue, uploadUnit := rateOrZero(req.UploadRateValue, req.UploadRateUnit)
-	if err := updateRootCeil(uplinkIface, uploadValue, uploadUnit); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -267,14 +249,4 @@ func uplinkInterfaceName() string {
 		return value
 	}
 	return defaultBindnetUplinkInterface
-}
-
-// rateOrZero devolve o valor/unidade efetivos de uma taxa, com 0/""
-// (sem limite - ensureRootQdisc/updateRootCeil tratam isso caindo no
-// teto nominal noLimitCeilMbps) quando o valor vier nil do backend.
-func rateOrZero(value *int, unit string) (int, string) {
-	if value == nil {
-		return 0, ""
-	}
-	return *value, unit
 }

@@ -9,7 +9,6 @@ import { HotspotClientsCard } from "@/components/hotspot/HotspotClientsCard";
 import { HotspotKnownDevicesCard } from "@/components/hotspot/HotspotKnownDevicesCard";
 import { HotspotSummaryCard } from "@/components/hotspot/HotspotSummaryCard";
 import { interfaceLabel } from "@/components/hotspot/HotspotInterfacesTab";
-import { GlobalLimitsCard } from "@/components/hotspot/GlobalLimitsCard";
 import { HotspotProfilesCard } from "@/components/hotspot/HotspotProfilesCard";
 import { HotspotVouchersCard } from "@/components/hotspot/HotspotVouchersCard";
 import { configSchema, type ConfigForm } from "@/components/hotspot/hotspot-schema";
@@ -28,7 +27,7 @@ export function HotspotPage() {
   const [tab, setTab] = useUrlTab("connected");
 
   const { status, config, interfaces, clients, blocklist, knownDevices } = useHotspotQueries();
-  const { saveAndApply, start, stop, recoverWifi, block, unblock, clearLogs } = useHotspotMutations({
+  const { saveAndApply, switchUplink, start, stop, recoverWifi, block, unblock, clearLogs } = useHotspotMutations({
     onSaveSuccess: () => setConfigOpen(false),
     onRecoverSuccess: () => setConfirmRecoverOpen(false),
   });
@@ -54,11 +53,18 @@ export function HotspotPage() {
   ];
 
   // Troca rapida de interface pelo card de resumo (sem abrir o dialog
-  // inteiro de "Alterar configuracao") - reusa o mesmo salvar+aplicar
-  // do formulario completo; a escolha do usuario no dropdown ja e a
-  // confirmacao, igual clicar em "Salvar e aplicar" no dialog.
+  // inteiro de "Alterar configuracao") - a escolha do usuario no
+  // dropdown ja e a confirmacao, igual clicar em "Salvar e aplicar" no
+  // dialog. INTERNET_INTERFACE tem caminho proprio (POST
+  // /api/hotspot/uplink): so a fonte de uplink muda, ao vivo, sem
+  // reiniciar o hotspot nem derrubar os clientes conectados; os demais
+  // campos continuam no salvar+aplicar completo (reinicia o AP).
   const handleQuickSwitchInterface = (field: "WIFI_INTERFACE" | "INTERNET_INTERFACE" | "WIFI_OPEN", value: string) => {
     if (!config.data) return;
+    if (field === "INTERNET_INTERFACE") {
+      switchUplink.mutate(value);
+      return;
+    }
     saveAndApply.mutate({ ...config.data, [field]: value } as ConfigForm);
   };
 
@@ -102,7 +108,7 @@ export function HotspotPage() {
         wifiInterfaceOptions={wifiInterfaceOptions}
         internetInterfaceOptions={internetInterfaceOptions}
         onQuickSwitchInterface={handleQuickSwitchInterface}
-        quickSwitchPending={saveAndApply.isPending}
+        quickSwitchPending={saveAndApply.isPending || switchUplink.isPending}
         startPending={start.isPending}
         stopPending={stop.isPending}
         recoverPending={recoverWifi.isPending}
@@ -149,10 +155,6 @@ export function HotspotPage() {
             onBlock={(mac, mode) => block.mutate({ mac, mode })}
             onUnblock={(mac) => unblock.mutate(mac)}
           />
-        </TabsContent>
-
-        <TabsContent value="limits" className="mt-0">
-          <GlobalLimitsCard />
         </TabsContent>
 
         <TabsContent value="profiles" className="mt-0">

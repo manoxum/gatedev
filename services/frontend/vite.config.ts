@@ -38,5 +38,11 @@ export default defineConfig(() => {
         "@": path.resolve(__dirname, "./src"),
       },
     },
+    build: {
+      // Facilita mapear stack traces do bundle minificado de volta pro
+      // codigo-fonte (ex.: erros reportados so pelo console do navegador,
+      // como o que motivou o ErrorBoundary em src/components/ErrorBoundary.tsx).
+      sourcemap: true,
+    },
   };
 });

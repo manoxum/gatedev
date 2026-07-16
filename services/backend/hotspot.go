@@ -53,7 +53,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 		iface, err := currentHotspotInterface(r.Context(), db)
 		if err == nil {
 			reapplyHotspotBlocklist(r.Context(), db, worker, iface)
-			reapplyHotspotShaping(r.Context(), db, worker, iface)
+			reapplyHotspotShaping(r.Context(), worker, iface)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -81,7 +81,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 			return
 		}
 		reapplyHotspotBlocklist(r.Context(), db, worker, iface)
-		reapplyHotspotShaping(r.Context(), db, worker, iface)
+		reapplyHotspotShaping(r.Context(), worker, iface)
 		if err := setHotspotDesiredState(r.Context(), db, true); err != nil {
 			log.Printf("[backend] falha ao gravar estado desejado do hotspot (ligado): %v", err)
 		}
@@ -176,6 +176,7 @@ func registerHotspotRoutes(mux *http.ServeMux, worker *workerClient, admin *admi
 	}))
 
 	registerHotspotLogsRoutes(mux, worker, admin, audit, db)
+	registerHotspotUplinkRoute(mux, admin, audit, db)
 }
 
 func applyHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerClient) error {

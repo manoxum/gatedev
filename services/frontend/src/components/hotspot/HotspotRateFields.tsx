@@ -4,12 +4,11 @@ import { Label } from "@/components/ui/label";
 import { SelectNative } from "@/components/ui/select-native";
 import { RateUnitOptions } from "@/components/hotspot/RateUnitOptions";
 
-// Fieldset de taxa (download/upload), extraido de HotspotRateQuotaFields
-// para ser reusado tanto pelo limite global (via HotspotRateQuotaFields)
-// quanto pelo limite de dispositivo/perfil (via HotspotLimitTypeFields) -
-// taxa e sempre independente do tipo de limitacao. register/errors
-// ficam frouxamente tipados de proposito, ja que este fieldset e
-// reusado por schemas zod diferentes que so compartilham esses campos.
+// Fieldset de taxa (download/upload), reusado pelo limite de
+// dispositivo/perfil (via HotspotLimitTypeFields) - taxa e sempre
+// independente do tipo de limitacao. register/errors ficam frouxamente
+// tipados de proposito, ja que este fieldset e reusado por schemas zod
+// diferentes que so compartilham esses campos.
 export function HotspotRateFields({
   register,
   errors,

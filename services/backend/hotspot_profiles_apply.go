@@ -7,7 +7,7 @@ import (
 
 // defaultProfileID e o id fixo do perfil "Padrao" semeado pela
 // migration 20260707000000_hotspot_profiles - mesmo idioma do literal
-// 'global' ja usado por hotspot_global_limits.id.
+// 'global' ja usado por hotspot_global_traffic.id.
 const defaultProfileID = "00000000-0000-0000-0000-000000000001"
 
 // deviceProfileID devolve o perfil vinculado ao MAC, ou o Padrao se o
@@ -47,8 +47,7 @@ func assignDeviceProfile(db *sql.DB, mac, profileID string) error {
 // decide, com "unlimited" como padrao enquanto o dispositivo ainda nao
 // tiver configurado nada. Um override deixado de uma configuracao
 // antiga fica dormente/ignorado se o perfil vinculado deixar de ser
-// "custom" - nunca cai para hotspot_global_limits, que ja e uma camada
-// HTB separada e sempre ativa, empilhar aqui duplicaria o enforcement.
+// "custom".
 func effectiveDeviceLimits(db *sql.DB, mac string) (hotspotLimits, error) {
 	profileID, err := deviceProfileID(db, mac)
 	if err != nil {

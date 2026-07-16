@@ -1,25 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { HotspotGlobalLimits, HotspotLimits } from "@/components/hotspot/hotspot-limits-types";
+import type { HotspotLimits } from "@/components/hotspot/hotspot-limits-types";
 
 function onLimitsError(error: unknown) {
   toast.error(error instanceof ApiError ? error.message : "Falha ao salvar limite");
-}
-
-export function useGlobalLimitsMutation() {
-  const queryClient = useQueryClient();
-
-  const save = useMutation({
-    mutationFn: (limits: HotspotGlobalLimits) => api.patch("/hotspot/limits/global", limits),
-    onSuccess: () => {
-      toast.success("Limite global salvo.");
-      queryClient.invalidateQueries({ queryKey: ["hotspot", "limits", "global"] });
-    },
-    onError: onLimitsError,
-  });
-
-  return { save };
 }
 
 // Sem mutation de "remover limite" - o tipo de limitação (ilimitado/

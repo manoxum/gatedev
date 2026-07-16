@@ -223,11 +223,11 @@ model HotspotDeviceInfo {
   @@map("hotspot_device_info")
 }
 
-// Limite de trafego para todo o hotspot (singleton, id fixo "global").
-// Taxa (valor + unidade kbit/mbit/gbit) e cota (bytes/periodo) sao
-// independentes e ambas opcionais - null no valor significa "sem
-// limite desse tipo" (a unidade sempre tem um default e nao e usada
-// nesse caso). Ver services/backend/hotspot_limits.go.
+// Tabela legada do antigo limite de trafego global do hotspot
+// (singleton, id fixo "global") - a funcionalidade foi removida (limite
+// hoje e sempre por dispositivo ou perfil selecionado, ver RULE.md),
+// sem leitor/escritor Go daqui pra frente. Fica no banco por convencao
+// (migrations deste repo nunca fazem DROP TABLE).
 model HotspotGlobalLimits {
   id                         String   @id @default("global") @map("id")
   downloadRateValue          Int?     @map("download_rate_value")
@@ -254,8 +254,8 @@ model HotspotGlobalLimits {
 // quotaBytes/quotaPeriod/quotaThrottle* sao o shape antigo: ficam no
 // banco por convencao (migrations deste repo nunca fazem DROP COLUMN,
 // ver 20260713000000_hotspot_limit_type/migration.sql), mas nao tem
-// mais leitor/escritor Go para device/perfil - so hotspot_global_limits
-// continua usando esse shape antigo por completo.
+// mais leitor/escritor Go nenhum (o antigo limite global que ainda
+// usava esse shape foi removido, ver HotspotGlobalLimits acima).
 model HotspotDeviceLimits {
   macAddress                 String   @id @map("mac_address")
   downloadRateValue          Int?     @map("download_rate_value")
@@ -303,10 +303,14 @@ model HotspotDeviceQuotaPeriod {
   @@map("hotspot_device_quota_periods")
 }
 
-// Acumulador de uso do periodo corrente para a cota global (singleton).
+// Acumulador de trafego agregado do hotspot inteiro (singleton).
 // last_*_counter guarda a ultima leitura absoluta dos contadores do
-// worker, usada para calcular o delta a cada ciclo de reconciliacao -
-// ver services/backend/hotspot_traffic.go.
+// worker, usada para calcular o delta a cada ciclo de reconciliacao e
+// alimentar o velocimetro/grafico geral (useGlobalStats/
+// useGlobalSpeedHistory no frontend) - ver services/backend/hotspot_traffic.go
+// e hotspot_quota.go. downloadBytes/uploadBytes/throttled sao do antigo
+// limite/cota global (removido, ver RULE.md): ainda incrementados por
+// compatibilidade com a coluna, mas sem leitor Go.
 model HotspotGlobalTraffic {
   id                  String   @id @default("global") @map("id")
   periodStart         DateTime @default(now()) @map("period_start") @db.Timestamptz

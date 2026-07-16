@@ -34,6 +34,19 @@ export function useHotspotMutations({ onSaveSuccess, onRecoverSuccess }: UseHots
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao salvar/aplicar"),
   });
 
+  // Troca só a fonte de internet (uplink), sem reiniciar o hotspot: o
+  // backend grava INTERNET_INTERFACE e o monitor de uplink do serviço
+  // alterna o NAT ao vivo em até ~10s (ver
+  // services/worker/hotspot/uplink.sh) — clientes conectados não caem.
+  const switchUplink = useMutation({
+    mutationFn: (iface: string) => api.post("/hotspot/uplink", { interface: iface }),
+    onSuccess: () => {
+      toast.success("Fonte de internet alterada — aplica ao vivo em alguns segundos, sem reiniciar o hotspot.");
+      queryClient.invalidateQueries({ queryKey: ["hotspot"] });
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao trocar fonte de internet"),
+  });
+
   const start = useMutation({
     mutationFn: () => api.post("/hotspot/start"),
     onSuccess: () => {
@@ -92,7 +105,7 @@ export function useHotspotMutations({ onSaveSuccess, onRecoverSuccess }: UseHots
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Falha ao limpar logs"),
   });
 
-  return { saveAndApply, start, stop, recoverWifi, block, unblock, clearLogs };
+  return { saveAndApply, switchUplink, start, stop, recoverWifi, block, unblock, clearLogs };
 }
 
 // useIdentifyDevice e useUpdateDeviceIdentity são independentes de

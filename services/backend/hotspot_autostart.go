@@ -75,7 +75,7 @@ func startHotspotAndReapply(ctx context.Context, db *sql.DB, worker *workerClien
 		return err
 	}
 	reapplyHotspotBlocklist(ctx, db, worker, iface)
-	reapplyHotspotShaping(ctx, db, worker, iface)
+	reapplyHotspotShaping(ctx, worker, iface)
 	audit.record(ctx, "hotspot_started", username, nil)
 	return nil
 }

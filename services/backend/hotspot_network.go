@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // currentHotspotInterface busca WIFI_INTERFACE configurado pelo painel -
@@ -29,4 +31,33 @@ func recoverWifiAdapter(ctx context.Context, worker *workerClient, iface string)
 		return err
 	}
 	return worker.call(ctx, http.MethodPost, "/network/wifi-manage", map[string]string{"interface": iface}, nil)
+}
+
+// registerHotspotUplinkRoute troca SO a fonte de internet
+// (INTERNET_INTERFACE) sem reiniciar o hotspot: grava a chave no banco
+// e deixa o monitor de uplink do runner
+// (services/worker/hotspot/uplink.sh) detectar a mudanca e alternar o
+// NAT ao vivo em ate UPLINK_MONITOR_INTERVAL segundos - clientes
+// conectados nao caem. Com o hotspot parado, o valor simplesmente vale
+// no proximo start. Usada pelo quick-switch do card de resumo do
+// painel; o formulario completo ("Salvar e aplicar") continua
+// reiniciando, porque as demais chaves (SSID, senha, canal...) exigem
+// subir o hostapd de novo.
+func registerHotspotUplinkRoute(mux *http.ServeMux, admin *administrator, audit *auditClient, db *sql.DB) {
+	mux.HandleFunc("POST /api/hotspot/uplink", requireSession(admin, func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Interface string `json:"interface"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Interface) == "" {
+			http.Error(w, "campo 'interface' obrigatorio", http.StatusBadRequest)
+			return
+		}
+		if err := saveHotspotConfig(r.Context(), db, map[string]string{"INTERNET_INTERFACE": req.Interface}); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		username, _ := sessionUser(r, admin)
+		audit.record(r.Context(), "hotspot_uplink_switched", username, map[string]any{"interface": req.Interface})
+		w.WriteHeader(http.StatusNoContent)
+	}))
 }

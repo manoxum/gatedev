@@ -18,23 +18,6 @@ export const RATE_UNIT_LABELS: Record<RateUnit, string> = {
   gbyte: "GB",
 };
 
-// HotspotGlobalLimits e o limite global (singleton, sempre ativo,
-// nunca fallback de perfil/dispositivo) - shape antigo, com cota unica
-// + throttle, preservado so aqui. Ver services/backend/hotspot_global_limits.go.
-export interface HotspotGlobalLimits {
-  downloadRateValue: number | null;
-  downloadRateUnit: RateUnit;
-  uploadRateValue: number | null;
-  uploadRateUnit: RateUnit;
-  quotaBytes: number | null;
-  quotaUnit: RateUnit;
-  quotaPeriod: QuotaPeriod | null;
-  quotaThrottleDownloadValue: number | null;
-  quotaThrottleDownloadUnit: RateUnit;
-  quotaThrottleUploadValue: number | null;
-  quotaThrottleUploadUnit: RateUnit;
-}
-
 // Tipo unico e mutuamente exclusivo de limitacao de um dispositivo
 // (override) ou perfil - substitui a combinacao livre de cota+credito
 // que causava o bug de "cota para de contabilizar" (um perfil com os
@@ -60,9 +43,7 @@ export const LIMIT_TYPE_LABELS: Record<LimitType, string> = {
 // a politica de credito (ver hotspot-credit-types.ts), ou ate os 3
 // tetos de cota abaixo em simultaneo (cada um com seu proprio
 // acumulador, ver HotspotDeviceQuotaPeriodUsage). Taxa continua
-// independente do tipo, sempre configuravel. Nao confundir com
-// HotspotGlobalLimits acima - o limite global fica fora deste
-// redesenho.
+// independente do tipo, sempre configuravel.
 export interface HotspotLimits {
   downloadRateValue: number | null;
   downloadRateUnit: RateUnit;
@@ -102,16 +83,6 @@ export interface HotspotDeviceQuotaPeriodUsage {
   periodStart: string;
   periodEnd: string;
   blocked: boolean;
-}
-
-export interface HotspotTraffic {
-  downloadBytes: number;
-  uploadBytes: number;
-  periodStart: string;
-  periodEnd: string;
-  throttled: boolean;
-  quotaBytes: number | null;
-  quotaPeriod: QuotaPeriod | null;
 }
 
 export const GIGABYTE = 1024 * 1024 * 1024;

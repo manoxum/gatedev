@@ -60,35 +60,53 @@ func handleHotspotServiceAction(action string) http.HandlerFunc {
 	}
 }
 
-// unmanageWifiInterfaceIfIdle desgerencia a placa Wi-Fi fisica no
-// NetworkManager antes do hotspot subir. Nunca desgerencia/desconecta
-// quando WIFI_INTERFACE e INTERNET_INTERFACE sao a MESMA placa (Wi-Fi
-// para Wi-Fi de verdade, AP+STA concorrente) - incondicional, sem
-// checar se ela esta associada agora: o NetworkManager e o unico que
-// mantem essa associacao viva nesse modo (o create_ap so cria a
-// interface virtual ap0 ao lado dela, nunca assume a fisica sozinho).
-// Checar "esta associada agora?" antes de decidir e uma corrida real -
-// confirmado ao vivo que pegar a placa momentaneamente sem associacao
-// (ex.: NM ainda no meio da propria reconexao apos um restart) fazia
-// desgerenciar/desconectar mesmo assim, travando a placa desconectada
-// PARA SEMPRE dali em diante: com "managed no", nada mais tenta
-// reconecta-la (o NetworkManager e a unica coisa que faria isso, e
-// esta desligado), entao toda tentativa seguinte do hotspot encontra a
-// mesma placa sem associacao, indefinidamente, exigindo reconexao
-// manual pra sair desse estado. Qualquer outra combinacao (ex.:
-// internet via Ethernet) nao tem motivo pra preservar essa associacao,
-// mesmo que a placa esteja transitoriamente conectada a alguma rede
-// Wi-Fi do usuario sem relacao com o hotspot: deixa-la gerenciada
-// nesse caso so faz o NetworkManager continuar escaneando/tentando
-// (re)associar essa mesma placa enquanto o hostapd tenta manter o AP
-// nela, derrubando o beacon ("Failed to set beacon parameters"/"key
-// not allowed", ver Dockerfile). Falha/ausencia de iface nunca bloqueia
-// o start.
+// unmanageWifiInterfaceIfIdle decide, antes do hotspot subir, se a
+// placa Wi-Fi fisica fica com o NetworkManager ou sai dele:
+//
+//   - WIFI_INTERFACE == INTERNET_INTERFACE (Wi-Fi para Wi-Fi): a placa
+//     PRECISA continuar gerenciada - o NetworkManager e o unico que
+//     mantem a associacao STA viva (o create_ap so cria a interface
+//     virtual ap0 ao lado dela). Incondicional, sem checar se esta
+//     associada agora: checar seria uma corrida real (confirmado ao
+//     vivo - pegar a placa momentaneamente sem associacao durante uma
+//     reconexao fazia desgerenciar, travando-a desconectada PARA
+//     SEMPRE). Alem de nao desgerenciar, RE-gerencia (manageWifiInterface,
+//     idempotente): sem isso, trocar de um modo que desgerenciou a
+//     placa (ex.: Ethernet para Wi-Fi com a placa ociosa) para Wi-Fi
+//     para Wi-Fi deixava o drop-in orfao e a placa presa "unmanaged",
+//     e o hotspot esperava uma reconexao que nunca viria.
+//
+//   - Placas diferentes COM a placa Wi-Fi associada como cliente:
+//     preserva a associacao (mesma topologia de radio do Wi-Fi para
+//     Wi-Fi: o entrypoint sobe o AP numa ap0 virtual travada no canal
+//     da estacao, ver try_create_ap). E o que evita "partilhar do
+//     Ethernet desconecta o Wi-Fi e ele some do sistema": o Wi-Fi
+//     cliente do usuario continua funcionando e visivel no
+//     NetworkManager, so nao e usado como uplink do hotspot.
+//
+//   - Placas diferentes SEM associacao: desgerencia/desconecta como
+//     antes - o AP vai subir em --no-virt na placa fisica inteira, e
+//     deixa-la gerenciada faria o NetworkManager escanear/tentar
+//     (re)associar essa mesma placa enquanto o hostapd mantem o AP
+//     nela, derrubando o beacon ("Failed to set beacon parameters"/
+//     "key not allowed", ver Dockerfile).
+//
+// Corrida residual: a associacao pode cair entre esta checagem e o
+// primeiro try_create_ap (segundos). Nesse caso o AP sobe --no-virt
+// com a placa ainda gerenciada - o watchdog de beacon (watchdog.sh)
+// derruba/retenta se houver briga, e o NetworkManager reassociando
+// devolve o caminho preservado na tentativa seguinte. Falha/ausencia
+// de iface nunca bloqueia o start.
 func unmanageWifiInterfaceIfIdle(wifiInterface, internetInterface string) {
 	if wifiInterface == "" {
 		return
 	}
-	if wifiInterface == internetInterface {
+	if wifiInterface == internetInterface || interfaceAssociated(wifiInterface) {
+		if err := manageWifiInterface(wifiInterface); err != nil {
+			log.Printf("[worker] aviso: falha ao garantir %s gerenciada no NetworkManager: %v", wifiInterface, err)
+		} else {
+			log.Printf("[worker] placa %s mantida gerenciada no NetworkManager (associacao Wi-Fi cliente preservada para o hotspot)", wifiInterface)
+		}
 		return
 	}
 	if err := unmanageWifiInterface(wifiInterface); err != nil {

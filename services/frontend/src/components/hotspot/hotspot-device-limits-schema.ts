@@ -19,8 +19,7 @@ const rateUnit = z.enum(["kbit", "mbit", "gbit", "kbyte", "mbyte", "gbyte"]);
 // "custom" so e oferecido como opcao no formulario de perfil
 // (HotspotLimitTypeToggle com includeCustom) - o schema aceita o valor
 // nos dois casos por simplicidade (um so enum), ja que o formulario de
-// dispositivo nunca produz esse valor. O limite global continua no
-// shape antigo (hotspot-limits-schema.ts).
+// dispositivo nunca produz esse valor.
 export const hotspotLimitsFormSchema = z.object({
   downloadRateValue: optionalPositiveInt,
   downloadRateUnit: rateUnit,

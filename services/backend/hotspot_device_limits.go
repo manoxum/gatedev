@@ -48,9 +48,7 @@ func isValidLimitType(t limitType, allowCustom bool) bool {
 // perfil. LimitType decide qual bloco esta em uso: nenhum (unlimited),
 // a politica de credito vinculada em hotspot_device_credit (credit), ou
 // ate os 3 tetos de cota abaixo em simultaneo, cada um com seu proprio
-// acumulador em hotspot_device_quota_periods (quota). Nao confundir com
-// hotspotGlobalLimits (hotspot_global_limits.go) - o limite global fica
-// fora deste redesenho, mantem o shape antigo (cota unica com throttle).
+// acumulador em hotspot_device_quota_periods (quota).
 type hotspotLimits struct {
 	DownloadRateValue *int     `json:"downloadRateValue"`
 	DownloadRateUnit  rateUnit `json:"downloadRateUnit"`

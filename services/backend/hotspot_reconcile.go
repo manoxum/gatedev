@@ -66,7 +66,7 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerClient,
 		}
 	}
 
-	if err := reconcileGlobal(ctx, db, worker, iface); err != nil {
+	if err := reconcileGlobal(ctx, worker, iface); err != nil {
 		log.Printf("[backend] reconciliacao global falhou: %v", err)
 	}
 	if err := applyAutomaticRecharges(db); err != nil {
@@ -129,47 +129,19 @@ func reconcileDeviceShaping(ctx context.Context, db *sql.DB, worker *workerClien
 	return nil
 }
 
-// reconcileGlobal decide throttle/shaping a partir do acumulado global
-// ja atualizado - a leitura dos contadores/gravacao do delta
-// (recordGlobalUsage) roda separada, a 1s, em reconcileGlobalUsage
-// (hotspot_usage_sampling.go), mesma divisao de responsabilidade que
-// reconcileDeviceShaping (15s, aqui) x reconcileDeviceUsage (1s) - dois
-// lugares chamando recordGlobalUsage pro mesmo contador consumiriam a
-// mesma janela de delta um do outro.
-//
-// applyGlobalShaping roda TODO ciclo, nao so quando o throttle muda de
-// estado: e a unica reaplicacao periodica das regras de contagem
-// globais (bn-global-up/down) e da qdisc - sem isso, se elas se
-// perdessem uma vez (ex.: container do hotspot reiniciado sem o admin
-// tocar no limite global, unico outro gatilho que chama
-// applyGlobalShaping), ficavam perdidas para sempre, e o velocimetro/
-// grafico geral (useGlobalStats/useGlobalSpeedHistory) travava em
-// 0bps indefinidamente. ensureRootQdisc/ensureGlobalCounterRule ja sao
-// idempotentes, mesmo espirito de ensureDeviceShaping (chamada todo
-// ciclo por dispositivo, ver reconcileDeviceShaping acima).
-func reconcileGlobal(ctx context.Context, db *sql.DB, worker *workerClient, iface string) error {
-	limits, err := getGlobalLimits(db)
-	if err != nil {
-		return err
-	}
-	if limits.QuotaPeriod != nil {
-		if err := resetGlobalPeriodIfExpired(db, *limits.QuotaPeriod); err != nil {
-			return err
-		}
-	}
-	traffic, err := ensureGlobalTrafficRow(db)
-	if err != nil {
-		return err
-	}
-	exceeded := globalQuotaExceeded(limits, traffic)
-	if exceeded != traffic.Throttled {
-		if err := setGlobalThrottled(db, exceeded); err != nil {
-			return err
-		}
-		traffic.Throttled = exceeded
-	}
-	downloadRate, uploadRate := effectiveGlobalRates(limits, traffic)
-	return applyGlobalShaping(ctx, worker, iface, downloadRate, uploadRate)
+// reconcileGlobal reaplica todo ciclo as regras de contagem agregada
+// global (bn-global-up/down) - unica reaplicacao periodica delas: sem
+// isso, se elas se perdessem uma vez (ex.: container do hotspot
+// reiniciado), o velocimetro/grafico geral (useGlobalStats/
+// useGlobalSpeedHistory) travava em 0bps indefinidamente.
+// applyGlobalShaping/ensureGlobalCounterRule ja sao idempotentes, mesmo
+// espirito de ensureDeviceShaping (chamada todo ciclo por dispositivo,
+// ver reconcileDeviceShaping acima). Nao existe mais teto/cota global
+// aqui (removido, ver RULE.md) - o acumulado por dispositivo continua
+// sendo gravado separado, a 1s, em reconcileGlobalUsage
+// (hotspot_usage_sampling.go), so pra alimentar a velocidade ao vivo.
+func reconcileGlobal(ctx context.Context, worker *workerClient, iface string) error {
+	return applyGlobalShaping(ctx, worker, iface)
 }
 
 type shapingStatsPayload struct {
