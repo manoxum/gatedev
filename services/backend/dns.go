@@ -60,9 +60,17 @@ func registerDNSRoutes(mux *http.ServeMux, worker *workerClient, admin *administ
 			http.Error(w, "corpo invalido", http.StatusBadRequest)
 			return
 		}
-		if tlds, ok := config["DNS_LOCAL_TLDS"]; ok && strings.TrimSpace(tlds) == "" {
-			http.Error(w, "DNS_LOCAL_TLDS nao pode ficar vazio", http.StatusBadRequest)
-			return
+		if tlds, ok := config["DNS_LOCAL_TLDS"]; ok {
+			if err := validateLocalTLDs(tlds); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if domains, ok := config["DOMAINS"]; ok {
+			if err := validateDomains(domains); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 		if peers, ok := config["DISCOVER_CONFIGURED_PEERS"]; ok {
 			if err := replaceConfiguredPeerAddresses(r.Context(), db, parsePeerList(peers)); err != nil {

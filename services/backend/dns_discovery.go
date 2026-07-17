@@ -68,10 +68,11 @@ func normalizeNginxServer(value, root, path string) (discoveredServer, bool) {
 	return discoveredServer{Name: name, Zone: name, Source: "nginx-ui", Kind: kind, File: file}, true
 }
 
+// normalizeDNSZone descarta prefixos wildcard ("*.", "**.", ".") e o
+// ponto final, igual ao normalizeZone do dns-provider.
 func normalizeDNSZone(value string) string {
 	name := strings.ToLower(strings.TrimSpace(value))
-	name = strings.TrimPrefix(name, "*.")
-	name = strings.TrimPrefix(name, ".")
+	name = strings.TrimLeft(name, "*.")
 	return strings.TrimSuffix(name, ".")
 }
 

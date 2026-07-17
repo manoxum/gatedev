@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -33,8 +34,20 @@ export function DnsLocalTldsCard({ config, mutations, showActions = true, onChan
   }, [tlds]);
 
   function addTld() {
-    const value = newTld.trim().toLowerCase();
+    // Mesmas regras do dns-provider (RULE.md): aceita TLD simples
+    // ("local") ou sufixo com vários labels ("local.com",
+    // "a.b.local"); prefixos "*."/"**."/"." e ponto final são
+    // descartados. Um valor inválido salvo aqui derrubaria o
+    // dns-provider no boot.
+    const value = newTld.trim().toLowerCase().replace(/^[*.]+/, "").replace(/\.+$/, "");
     if (!value || tlds.includes(value)) return;
+    const label = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
+    if (!new RegExp(`^${label}(\\.${label})*$`).test(value)) {
+      toast.error(
+        `TLD inválido: "${value}". Use labels só com letras minúsculas, números e hífen (sem hífen nas pontas), separados por ponto — ex.: local ou local.com.`,
+      );
+      return;
+    }
     setTlds((current) => [...current, value]);
     setNewTld("");
   }
@@ -60,7 +73,7 @@ export function DnsLocalTldsCard({ config, mutations, showActions = true, onChan
         </div>
         <div className="flex gap-2">
           <Input
-            placeholder="ex.: local"
+            placeholder="ex.: local ou local.com"
             value={newTld}
             onChange={(e) => setNewTld(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTld())}

@@ -347,9 +347,16 @@ normalize_search_domains() {
 
   for i in "${!domains[@]}"; do
     domain="${domains[$i],,}"
-    domain="${domain#.}"
+    # Descarta prefixos wildcard ("*.", "**.", ".") e ponto final, igual
+    # ao normalizeZone do dns-provider - DNS_LOCAL_TLDS aceita sufixos
+    # com varios labels ("local.com", "a.b.local") como TLD local.
+    while [[ "${domain}" == .* || "${domain}" == \** ]]; do
+      domain="${domain#.}"
+      domain="${domain#\*}"
+    done
+    domain="${domain%.}"
     [[ -n "${domain}" ]] || continue
-    if ! [[ "${domain}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+    if ! [[ "${domain}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$ ]]; then
       log "ERRO: DNS_SEARCH_DOMAINS/DNS_LOCAL_TLDS contem dominio invalido para DHCP: ${domain}"
       exit 1
     fi

@@ -49,16 +49,16 @@ func zoneFor(fqdn string, cfg *dnsConfig) (zone string, kind zoneKind, nextHop s
 		}
 		return zone + ".", zoneMeshUnknown, ""
 	}
+	// TLDs locais casam por sufixo em qualquer profundidade ("local",
+	// "local.com", "a.b.local"), e um sufixo declarado explicitamente em
+	// DNS_LOCAL_TLDS vence o fallback mesh-unknown de DOMAINS abaixo.
+	if zone, ok := suffixZoneFor(labels, cfg.tlds); ok {
+		return zone + ".", zoneLocal, ""
+	}
 	if zone, ok := suffixZoneFor(labels, cfg.domainZones); ok {
 		return zone + ".", zoneMeshUnknown, ""
 	}
-
-	tld := labels[len(labels)-1]
-	zoneName := tld + "."
-	if cfg.tlds[tld] {
-		return zoneName, zoneLocal, ""
-	}
-	return zoneName, zoneNone, ""
+	return labels[len(labels)-1] + ".", zoneNone, ""
 }
 
 func suffixZoneFor(labels []string, domains map[string]bool) (string, bool) {

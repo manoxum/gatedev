@@ -26,9 +26,12 @@ func normalizeEnvValue(value string) string {
 	return trimmed
 }
 
-// parseTLDs segue as mesmas regras do antigo docker-entrypoint.sh:
-// minusculo, sem "." inicial, validado [a-z0-9-] sem hifen nas pontas,
-// duplicatas ignoradas, pelo menos um TLD valido exigido.
+// parseTLDs aceita tanto TLDs simples ("local") quanto sufixos com
+// varios labels tratados como TLD local ("local.com", "a.b.local"):
+// minusculo, prefixos "*."/"**."/"." descartados, cada label validado
+// [a-z0-9-] sem hifen nas pontas, duplicatas ignoradas, pelo menos uma
+// entrada valida exigida. Qualquer nome que termine num desses sufixos
+// resolve como zona local (ver zones.go).
 func parseTLDs(raw string) (map[string]bool, error) {
 	tlds, err := parseOptionalTLDs(raw, "DNS_LOCAL_TLDS")
 	if err != nil {
@@ -43,11 +46,11 @@ func parseTLDs(raw string) (map[string]bool, error) {
 func parseOptionalTLDs(raw string, envName string) (map[string]bool, error) {
 	tlds := map[string]bool{}
 	for _, part := range strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' }) {
-		tld := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(part), "."))
+		tld := normalizeZone(part)
 		if tld == "" {
 			continue
 		}
-		if !isValidTLD(tld) {
+		if !isValidDomain(tld) {
 			return nil, fmt.Errorf("%s contem TLD invalido: %s", envName, tld)
 		}
 		tlds[tld] = true
@@ -70,18 +73,12 @@ func parseOptionalDomains(raw string, envName string) (map[string]bool, error) {
 	return domains, nil
 }
 
+// normalizeZone descarta prefixos wildcard ("*.", "**.", ".") e o ponto
+// final: "**.a.b.local" e "a.b.local" declaram o mesmo sufixo local.
 func normalizeZone(value string) string {
 	domain := strings.ToLower(strings.TrimSpace(value))
-	domain = strings.TrimPrefix(domain, "*.")
-	domain = strings.TrimPrefix(domain, ".")
+	domain = strings.TrimLeft(domain, "*.")
 	return strings.TrimSuffix(domain, ".")
-}
-
-func isValidTLD(tld string) bool {
-	if strings.Contains(tld, ".") {
-		return false
-	}
-	return isValidDNSLabel(tld)
 }
 
 func isValidDomain(domain string) bool {

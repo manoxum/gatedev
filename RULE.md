@@ -343,7 +343,9 @@ Regras:
   (`DNS_SEARCH_DOMAINS`, ou `DNS_LOCAL_TLDS` quando ausente). Isso é
   necessário para clientes como Ubuntu/systemd-resolved rotearem
   `*.local`, `*.test` e `*.example` para o DNS do link Wi-Fi em vez de
-  mDNS/outros links.
+  mDNS/outros links. Entradas com vários labels (`local.com`) são
+  aceitas e anunciadas como estão; prefixos `*.`/`**.`/`.` são
+  descartados, igual à normalização do `dns-provider`.
 - Ao encerrar (`SIGTERM`/`SIGINT`/saída normal), o hotspot **sempre**
   chama `create_ap --stop` antes de sair, para não deixar a placa em
   modo AP "preso".
@@ -653,9 +655,22 @@ customizados fora da imagem oficial.
 Regras:
 
 - `DNS_LOCAL_TLDS` define os TLDs tratados como locais (padrão
-  `local,test,example`). Cada TLD é validado (`[a-z0-9-]`, sem começar
-  ou terminar com `-`); TLD inválido é erro fatal. Duplicatas são
-  ignoradas silenciosamente.
+  `local,test,example`). Cada entrada pode ser um TLD simples
+  (`local`) ou um **sufixo com vários labels tratado como TLD local**
+  (`local.com`, `a.b.local`): qualquer nome que termine nesse sufixo,
+  em qualquer profundidade (`app.local.com`, `x.y.z.local.com`),
+  resolve como zona local. Prefixos `*.`/`**.`/`.` e ponto final são
+  descartados na normalização (`**.a.b.local` declara o mesmo sufixo
+  que `a.b.local`). Cada label é validado (`[a-z0-9-]`, sem começar ou
+  terminar com `-`); entrada inválida é erro fatal. Duplicatas são
+  ignoradas silenciosamente. Um sufixo declarado em `DNS_LOCAL_TLDS`
+  tem precedência sobre o fallback NXDOMAIN de nomes desconhecidos
+  dentro de uma raiz ampla de `DOMAINS`. O painel
+  (`PATCH /api/dns/config`) valida `DNS_LOCAL_TLDS` e `DOMAINS` com
+  estas mesmas regras e rejeita valores inválidos com `400` antes de
+  gravar no `.env` — sem isso, um valor inválido salvo pelo painel
+  deixava o `dns-provider` em loop de restart e derrubava toda a
+  resolução local.
 - `DOMAINS` define as zonas que participam do **discover mode**. Valores
   com um label (ex.: `bnet`, `dev`, `discover`) são raízes amplas da
   malha: nomes dentro delas só resolvem se forem locais via
