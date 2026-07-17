@@ -56,6 +56,7 @@ services:
       MONGO_INITDB_DATABASE: ${MONGO_DB:-bindnet}
     volumes:
       - mongo_data:/data/db
+      - mongo_config:/data/configdb
     networks:
       proxy:
       dbnet: 
@@ -113,5 +114,6 @@ volumes:
   cert_proxy_data:
   postgres_data:
   mongo_data:
+  mongo_config:
   minio_data:
   redis_data:
