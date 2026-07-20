@@ -113,15 +113,10 @@ services:
       # endereco deste no (GET /api/dns/node) - quem escuta nela e o
       # dns-provider, nao o backend.
       DISCOVER_PORT: ${DISCOVER_PORT:-8531}
-      # TRANSITORIO: CA_COMMON_NAME e NGINX_UI_USERNAME/PASSWORD agora sao
-      # editados no painel (Configuracoes) e vivem na tabela panel_config.
-      # Estas tres linhas existem so para a importacao unica que o backend
-      # faz no boot (settings.ImportFromEnv) trazer o que ainda estiver no
-      # .env. Depois do primeiro boot desta versao, podem ser removidas
-      # daqui e do .env.main.
-      CA_COMMON_NAME: ${CA_COMMON_NAME:-}
-      NGINX_UI_USERNAME: ${NGINX_UI_USERNAME:-}
-      NGINX_UI_PASSWORD: ${NGINX_UI_PASSWORD:-}
+      # CA_COMMON_NAME e NGINX_UI_USERNAME/PASSWORD nao aparecem aqui de
+      # proposito: sao editados no painel (Configuracoes) e vivem na tabela
+      # panel_config. settings.ImportFromEnv continua no codigo so para
+      # migrar instalacoes que ainda tenham esses valores no ambiente.
     expose:
       - "8090"
     ports:
