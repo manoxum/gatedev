@@ -43,7 +43,6 @@ func main() {
 
 	mux := http.NewServeMux()
 	compose.RegisterContainerRoutes(mux)
-	compose.RegisterEnvRoutes(mux)
 	hotspot.RegisterServiceRoutes(mux)
 	hotspot.RegisterClientRoutes(mux)
 	hotspot.RegisterFingerprintRoutes(mux)

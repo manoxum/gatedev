@@ -101,6 +101,19 @@ load_runtime_config_from_db() {
     esac
   done <<< "${rows}"
 
+  # DNS_LOCAL_TLDS tambem saiu do .env: agora e configuracao do painel na
+  # tabela dns_config (a mesma que o dns-provider le). Aqui serve so para
+  # os dominios de busca entregues por DHCP (ver normalize_search_domains).
+  # Best-effort de proposito: se a tabela ainda nao existir ou a consulta
+  # falhar, mantem o que veio do ambiente - dominio de busca e um extra,
+  # nunca motivo para nao subir o AP.
+  local dns_local_tlds
+  dns_local_tlds="$(psql_hotspot -Atqc "SELECT value FROM dns_config WHERE key = 'DNS_LOCAL_TLDS'" 2>/dev/null || true)"
+  if [[ -n "${dns_local_tlds}" ]]; then
+    DNS_LOCAL_TLDS="${dns_local_tlds}"
+    export DNS_LOCAL_TLDS
+  fi
+
   log "Configuracao operacional do hotspot carregada diretamente do banco de dados."
 }
 

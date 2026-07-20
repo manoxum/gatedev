@@ -15,9 +15,9 @@ import (
 
 func RegisterDNSRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *auth.Administrator, audit *audit.Client, db *sql.DB) {
 	mux.HandleFunc("GET /api/dns/node", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		var config map[string]string
-		if err := worker.Call(r.Context(), http.MethodGet, "/env?section=dns", nil, &config); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+		cfg, err := getDNSConfig(r.Context(), db)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		fingerprint, err := loadLocalNodeFingerprint(r.Context(), db)
@@ -25,28 +25,24 @@ func RegisterDNSRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *auth
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		nodeName := strings.TrimSpace(config["DISCOVER_NODE_NAME"])
+		nodeName := strings.TrimSpace(cfg[KeyNodeName])
 		if nodeName == "" {
 			nodeName = "este-servidor"
-		}
-		port := strings.TrimSpace(config["DISCOVER_PORT"])
-		if port == "" {
-			port = "8531"
 		}
 		response := map[string]any{
 			"nodeName":    nodeName,
 			"fingerprint": fingerprint,
-			"domains":     parsePeerList(config["DOMAINS"]),
-			"port":        port,
+			"domains":     parsePeerList(cfg[KeyDomains]),
+			"port":        discoverPort(),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
 	}))
 
 	mux.HandleFunc("GET /api/dns/config", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		var config map[string]string
-		if err := worker.Call(r.Context(), http.MethodGet, "/env?section=dns", nil, &config); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+		cfg, err := getDNSConfig(r.Context(), db)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		peers, err := loadConfiguredPeerAddresses(r.Context(), db)
@@ -54,46 +50,54 @@ func RegisterDNSRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *auth
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		config["DISCOVER_CONFIGURED_PEERS"] = strings.Join(peers, ",")
+		cfg["DISCOVER_CONFIGURED_PEERS"] = strings.Join(peers, ",")
+		// DISCOVER_PORT segue vindo do ambiente (porta de infraestrutura),
+		// mas continua no mesmo payload para o frontend nao precisar saber
+		// de onde cada valor vem.
+		cfg["DISCOVER_PORT"] = discoverPort()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(config)
+		_ = json.NewEncoder(w).Encode(cfg)
 	}))
 
 	mux.HandleFunc("PATCH /api/dns/config", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		var config map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		var cfg map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 			http.Error(w, "corpo invalido", http.StatusBadRequest)
 			return
 		}
-		if tlds, ok := config["DNS_LOCAL_TLDS"]; ok {
+		if tlds, ok := cfg[KeyLocalTLDs]; ok {
 			if err := validateLocalTLDs(tlds); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 		}
-		if domains, ok := config["DOMAINS"]; ok {
+		if domains, ok := cfg[KeyDomains]; ok {
 			if err := validateDomains(domains); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 		}
-		if peers, ok := config["DISCOVER_CONFIGURED_PEERS"]; ok {
+		if peers, ok := cfg["DISCOVER_CONFIGURED_PEERS"]; ok {
 			if err := replaceConfiguredPeerAddresses(r.Context(), db, parsePeerList(peers)); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			delete(config, "DISCOVER_CONFIGURED_PEERS")
+			delete(cfg, "DISCOVER_CONFIGURED_PEERS")
 		}
-		if peers, ok := config["DISCOVER_PEERS"]; ok {
+		if peers, ok := cfg["DISCOVER_PEERS"]; ok {
 			if err := replaceConfiguredPeerAddresses(r.Context(), db, parsePeerList(peers)); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			delete(config, "DISCOVER_PEERS")
+			delete(cfg, "DISCOVER_PEERS")
 		}
-		if len(config) > 0 {
-			if err := worker.Call(r.Context(), http.MethodPatch, "/env?section=dns", config, nil); err != nil {
-				http.Error(w, err.Error(), http.StatusBadGateway)
+		// DISCOVER_PORT nao e editavel pelo painel (vem do compose); ignora
+		// em vez de recusar o PATCH inteiro, para um payload antigo do
+		// frontend nao quebrar o salvamento das outras chaves.
+		delete(cfg, "DISCOVER_PORT")
+		if len(cfg) > 0 {
+			if err := saveDNSConfig(r.Context(), db, cfg); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 		}

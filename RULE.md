@@ -668,8 +668,8 @@ Regras:
   dentro de uma raiz ampla de `DOMAINS`. O painel
   (`PATCH /api/dns/config`) valida `DNS_LOCAL_TLDS` e `DOMAINS` com
   estas mesmas regras e rejeita valores inválidos com `400` antes de
-  gravar no `.env` — sem isso, um valor inválido salvo pelo painel
-  deixava o `dns-provider` em loop de restart e derrubava toda a
+  gravar na tabela `dns_config` — sem isso, um valor inválido salvo pelo
+  painel deixava o `dns-provider` em loop de restart e derrubava toda a
   resolução local.
 - `DOMAINS` define as zonas que participam do **discover mode**. Valores
   com um label (ex.: `bnet`, `dev`, `discover`) são raízes amplas da
@@ -854,8 +854,11 @@ Regras:
      confiança já estabelecida nos dispositivos que já importaram essa
      CA quando o stack ainda usava `cert-proxy`.
   3. Senão → gera uma CA nova (`source='generated'`): RSA 4096, válida 10
-     anos, CN de `CA_COMMON_NAME` (padrão "Bindnet Local Development
-     CA"). Mesmos parâmetros criptográficos do antigo `cert-proxy`.
+     anos, CN vindo de `panel_config.CA_COMMON_NAME` (definido no painel
+     em Configurações; padrão "Bindnet Local Development CA"). Mesmos
+     parâmetros criptográficos do antigo `cert-proxy`. Trocar o CN depois
+     não renomeia nem reemite a CA já criada — só valeria para uma CA
+     gerada do zero.
 - `POST /api/certificates` emite um certificado *leaf* (RSA 2048) a
   partir de `domains` (lista de domínios/IPs) — todos os itens viram
   SAN (Subject Alternative Name) de um único certificado; o primeiro
@@ -872,8 +875,9 @@ Regras:
   nunca ultrapassa a validade da própria CA local.
 - Após persistir no Postgres, o backend importa o certificado para o
   `nginx-ui`, para que ele apareça em
-  `/#/certificates/list?search={}`. Se `NGINX_UI_USERNAME` e
-  `NGINX_UI_PASSWORD` estiverem preenchidos, usa a API `/api/certs`;
+  `/#/certificates/list?search={}`. Se as credenciais do `nginx-ui`
+  estiverem definidas no painel (Configurações, tabela `panel_config`:
+  `NGINX_UI_USERNAME`/`NGINX_UI_PASSWORD`), usa a API `/api/certs`;
   caso contrário, grava os PEMs em `/etc/nginx/ssl/<domínio primário>/`
   e registra a linha correspondente (com todos os SANs em `domains`) no
   `database.db` do `nginx-ui` via os volumes compartilhados.
@@ -1030,18 +1034,26 @@ Regras:
   física; esses serviços só sobem quando o usuário aplica/inicia o
   hotspot pelo painel. `migration` (job one-shot) propositalmente não
   está nessa lista.
-- Editar `.env` a partir do painel (`GET/PATCH /env` no worker) é
-  restrito por "seção": a seção `hotspot` só pode tocar
-  `WIFI_*`/`HOTSPOT_GATEWAY`/`HOTSPOT_CIDR`; a seção `dns` só pode
-  tocar `DNS_LOCAL_TLDS`, `DOMAINS`, `DISCOVER_REMOTE_ROUTES`,
-  `DISCOVER_NODE_NAME` e `DISCOVER_PORT`. O editor preserva comentários,
-  ordem e chaves não mencionadas — nunca regenera o arquivo do zero.
-- "Salvar" configuração (grava no `.env`) e "aplicar" (recria o
+- O painel **não edita mais o `.env`**. Toda configuração operacional
+  vive no Postgres, em tabelas chave/valor: `hotspot_config`
+  (`WIFI_*`, `HOTSPOT_GATEWAY`, `HOTSPOT_CIDR`, …), `dns_config`
+  (`DNS_LOCAL_TLDS`, `DOMAINS`, `DISCOVER_NODE_NAME`,
+  `DISCOVER_REMOTE_ROUTES`) e `panel_config` (`CA_COMMON_NAME`,
+  `NGINX_UI_USERNAME`, `NGINX_UI_PASSWORD`). Cada serviço lê a sua
+  tabela direto do banco quando inicia — ninguém reescreve arquivo de
+  ambiente. `DISCOVER_PORT` continua vindo do `.env`/compose por ser
+  porta de infraestrutura, não configuração de negócio.
+- Na primeira subida após essa migração, `backend` e `dns-provider`
+  fazem uma **importação única** do que ainda estiver no ambiente para
+  as tabelas (`ON CONFLICT DO NOTHING`), para uma instalação existente
+  não cair nos defaults. Depois disso o painel é a fonte de verdade e as
+  variáveis podem sair do `.env`.
+- "Salvar" configuração (grava no banco) e "aplicar" (recria o
   container via `docker compose up -d --no-build`) são ações
   separadas — o painel nunca reinicia o hotspot/DNS sozinho ao salvar,
-  só quando o usuário confirma explicitamente "aplicar". Exceção:
-  peers diretos da malha Bindnet são estado operacional e ficam no
-  Postgres (`discover_configured_peers`), não no `.env`.
+  só quando o usuário confirma explicitamente "aplicar". Peers diretos
+  da malha Bindnet seguem a mesma ideia, no Postgres
+  (`discover_configured_peers`).
 - **`backend`** nunca monta `docker.sock` nem roda em
   `network_mode: host`; toda operação privilegiada (controlar
   containers, NetworkManager, listar interfaces/clientes, testar DNS)

@@ -12,10 +12,13 @@ package cert
 
 import (
 	"bindnet/backend/internal/platform/config"
+	"bindnet/backend/internal/settings"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
@@ -43,11 +46,12 @@ type nginxUILoginResponse struct {
 }
 
 // nginxUIConfigured indica se as credenciais da API do nginx-ui foram
-// preenchidas em .env - o sync e um extra opcional, nao deve impedir a
-// emissao do certificado (que ja e persistida no Postgres) se o usuario
-// nao configurou isso.
-func nginxUIConfigured() bool {
-	return config.Getenv("NGINX_UI_USERNAME", "") != "" && config.Getenv("NGINX_UI_PASSWORD", "") != ""
+// configuradas no painel (tabela panel_config) - o sync e um extra
+// opcional, nao deve impedir a emissao do certificado (ja persistida no
+// Postgres) se o operador nao configurou isso.
+func nginxUIConfigured(db *sql.DB) bool {
+	username, password := settings.NginxUICredentials(context.Background(), db)
+	return username != "" && password != ""
 }
 
 func nginxUIBaseURL() string {
@@ -57,15 +61,16 @@ func nginxUIBaseURL() string {
 // nginxUILogin replica o fluxo de login criptografado do nginx-ui:
 // 1) busca a chave publica RSA temporaria da instancia; 2) criptografa
 // usuario/senha com ela; 3) troca isso por um token JWT.
-func nginxUILogin() (string, error) {
+func nginxUILogin(db *sql.DB) (string, error) {
 	publicKey, err := fetchNginxUIPublicKey()
 	if err != nil {
 		return "", fmt.Errorf("chave publica do nginx-ui: %w", err)
 	}
 
+	username, password := settings.NginxUICredentials(context.Background(), db)
 	credentials, err := json.Marshal(map[string]string{
-		"name":     config.Getenv("NGINX_UI_USERNAME", ""),
-		"password": config.Getenv("NGINX_UI_PASSWORD", ""),
+		"name":     username,
+		"password": password,
 	})
 	if err != nil {
 		return "", err
@@ -132,9 +137,9 @@ func fetchNginxUIPublicKey() (*rsa.PublicKey, error) {
 // dominio/CN primario (usado no nome/caminho); sanDomains e a lista
 // completa de dominios/IPs do certificado (SAN), incluindo o primario -
 // so usada para preencher a coluna "domains" do nginx-ui.
-func syncCertificateToNginxUI(domain string, sanDomains []string, certificatePEM, privateKeyPEM string) error {
-	if nginxUIConfigured() {
-		if err := syncCertificateToNginxUIAPI(domain, certificatePEM, privateKeyPEM); err == nil {
+func syncCertificateToNginxUI(db *sql.DB, domain string, sanDomains []string, certificatePEM, privateKeyPEM string) error {
+	if nginxUIConfigured(db) {
+		if err := syncCertificateToNginxUIAPI(db, domain, certificatePEM, privateKeyPEM); err == nil {
 			return nil
 		} else {
 			log.Printf("[backend] sync via API do nginx-ui falhou para %s, tentando importacao local: %v", domain, err)
@@ -144,8 +149,8 @@ func syncCertificateToNginxUI(domain string, sanDomains []string, certificatePEM
 	return syncCertificateToNginxUILocal(domain, sanDomains, certificatePEM, privateKeyPEM)
 }
 
-func syncCertificateToNginxUIAPI(domain, certificatePEM, privateKeyPEM string) error {
-	token, err := nginxUILogin()
+func syncCertificateToNginxUIAPI(db *sql.DB, domain, certificatePEM, privateKeyPEM string) error {
+	token, err := nginxUILogin(db)
 	if err != nil {
 		return err
 	}

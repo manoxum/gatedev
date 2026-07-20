@@ -53,18 +53,8 @@ func RegisterDNSPeerRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sq
 	}))
 
 	mux.HandleFunc("POST /api/dns/peers/search", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		var config map[string]string
-		if err := worker.Call(r.Context(), http.MethodGet, "/env?section=dns", nil, &config); err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		port := strings.TrimSpace(config["DISCOVER_PORT"])
-		if port == "" {
-			port = "8531"
-		}
-
 		var peers []discoveredPeer
-		if err := worker.Call(r.Context(), http.MethodPost, "/network/peer-scan", map[string]string{"port": port}, &peers); err != nil {
+		if err := worker.Call(r.Context(), http.MethodPost, "/network/peer-scan", map[string]string{"port": discoverPort()}, &peers); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}

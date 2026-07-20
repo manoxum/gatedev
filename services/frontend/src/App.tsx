@@ -12,6 +12,7 @@ import { DnsPage } from "@/pages/Dns";
 import { CertificatesPage } from "@/pages/Certificates";
 import { BindnetsPage } from "@/pages/Bindnets";
 import { BindnetDetailPage } from "@/pages/BindnetDetail";
+import { SettingsPage } from "@/pages/Settings";
 
 export default function App() {
   return (
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="bindnets" element={<BindnetsPage />} />
         <Route path="bindnets/:nodeId" element={<BindnetDetailPage />} />
         <Route path="certificates" element={<CertificatesPage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   );

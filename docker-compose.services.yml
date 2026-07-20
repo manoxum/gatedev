@@ -107,9 +107,19 @@ services:
       HOTSPOT_CREDIT_TRACE_RETENTION_DAYS: ${HOTSPOT_CREDIT_TRACE_RETENTION_DAYS:-180}
       MINIO_HOST: minio
       MINIO_PORT: "9000"
-      CA_COMMON_NAME: ${CA_COMMON_NAME:-Bindnet Local Development CA}
       BINDNET_OUI_DB_PATH: ${BINDNET_OUI_DB_PATH:-/usr/local/share/bindnet/oui.csv}
       NGINX_UI_URL: ${NGINX_UI_URL:-http://nginx-ui:9000}
+      # Porta do endpoint de descoberta, so para o painel exibir/montar o
+      # endereco deste no (GET /api/dns/node) - quem escuta nela e o
+      # dns-provider, nao o backend.
+      DISCOVER_PORT: ${DISCOVER_PORT:-8531}
+      # TRANSITORIO: CA_COMMON_NAME e NGINX_UI_USERNAME/PASSWORD agora sao
+      # editados no painel (Configuracoes) e vivem na tabela panel_config.
+      # Estas tres linhas existem so para a importacao unica que o backend
+      # faz no boot (settings.ImportFromEnv) trazer o que ainda estiver no
+      # .env. Depois do primeiro boot desta versao, podem ser removidas
+      # daqui e do .env.main.
+      CA_COMMON_NAME: ${CA_COMMON_NAME:-}
       NGINX_UI_USERNAME: ${NGINX_UI_USERNAME:-}
       NGINX_UI_PASSWORD: ${NGINX_UI_PASSWORD:-}
     expose:

@@ -7,7 +7,8 @@
 package cert
 
 import (
-	"bindnet/backend/internal/platform/config"
+	"bindnet/backend/internal/settings"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -90,7 +91,7 @@ func LoadOrImportCA(db *sql.DB) (*localCA, error) {
 	tpl := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName:   config.Getenv("CA_COMMON_NAME", "Bindnet Local Development CA"),
+			CommonName:   settings.CACommonName(context.Background(), db),
 			Organization: []string{"Bindnet Docker Stack"},
 		},
 		NotBefore:             now.Add(-time.Hour),

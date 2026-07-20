@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/miekg/dns"
-
 	"bindnet/dns-provider/internal/cache"
 	"bindnet/dns-provider/internal/config"
 	"bindnet/dns-provider/internal/core"
@@ -26,27 +24,37 @@ import (
 	"bindnet/dns-provider/internal/store"
 )
 
-// hostname devolve o hostname do container, usado como valor padrao de
-// DISCOVER_NODE_NAME quando a variavel nao e definida.
-func hostname() string {
-	name, err := os.Hostname()
-	if err != nil || name == "" {
-		return "no-desconhecido"
-	}
-	return name
-}
-
 func main() {
 	log.SetFlags(log.LstdFlags)
 	log.Println("[dns-provider] iniciando servidor DNS split-horizon")
 
-	tlds, err := config.ParseTLDs(config.Getenv("DNS_LOCAL_TLDS", "local,test,example"))
+	db, err := store.OpenPostgres()
+	if err != nil {
+		log.Fatalf("[dns-provider] erro ao conectar no Postgres: %v", err)
+	}
+	defer db.Close()
+
+	// A configuracao de DNS vem do painel (tabela dns_config), nao mais do
+	// .env. O import abaixo traz uma unica vez o que ainda estiver no
+	// ambiente, para a instalacao existente nao cair nos defaults na
+	// primeira subida depois da migracao.
+	dnsCfgCtx, dnsCfgCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := store.ImportDNSConfigFromEnv(dnsCfgCtx, db); err != nil {
+		log.Printf("[dns-provider] aviso: falha ao importar dns_config do ambiente: %v", err)
+	}
+	dnsCfg, err := store.LoadDNSConfig(dnsCfgCtx, db)
+	dnsCfgCancel()
+	if err != nil {
+		log.Fatalf("[dns-provider] erro ao ler dns_config do Postgres: %v", err)
+	}
+
+	tlds, err := config.ParseTLDs(store.Setting(dnsCfg, store.KeyLocalTLDs, "local,test,example"))
 	if err != nil {
 		log.Fatalf("[dns-provider] %v", err)
 	}
 	log.Printf("[dns-provider] TLDs locais resolvidos: %v", config.ZoneNames(tlds))
 
-	domainZones, err := config.ParseOptionalDomains(os.Getenv("DOMAINS"), "DOMAINS")
+	domainZones, err := config.ParseOptionalDomains(store.Setting(dnsCfg, store.KeyDomains, ""), "DOMAINS")
 	if err != nil {
 		log.Fatalf("[dns-provider] %v", err)
 	}
@@ -57,12 +65,6 @@ func main() {
 	if len(nginxNames.Hosts) > 0 || len(nginxNames.Zones) > 0 {
 		log.Printf("[dns-provider] server_name do nginx-ui descobertos: hosts=%v zonas=%v", config.ZoneNames(nginxNames.Hosts), config.ZoneNames(nginxNames.Zones))
 	}
-
-	db, err := store.OpenPostgres()
-	if err != nil {
-		log.Fatalf("[dns-provider] erro ao conectar no Postgres: %v", err)
-	}
-	defer db.Close()
 
 	gatewayCtx, gatewayCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	hotspotGateway, err := store.LoadHotspotGateway(gatewayCtx, db, "192.168.12.1")
@@ -115,14 +117,14 @@ func main() {
 	}
 	hydrateCancel()
 
-	nodeName := config.Getenv("DISCOVER_NODE_NAME", hostname())
+	nodeName := store.Setting(dnsCfg, store.KeyNodeName, hostname())
 	identityCtx, identityCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	fingerprint, err := store.EnsureNodeFingerprint(identityCtx, db)
 	identityCancel()
 	if err != nil {
 		log.Fatalf("[dns-provider] erro ao garantir fingerprint local: %v", err)
 	}
-	remoteMode := config.NormalizeRemoteRouteMode(config.Getenv("DISCOVER_REMOTE_ROUTES", "auto"))
+	remoteMode := config.NormalizeRemoteRouteMode(store.Setting(dnsCfg, store.KeyRemoteRoutes, "auto"))
 	discoverPort := config.Getenv("DISCOVER_PORT", "8531")
 
 	routes := core.NewTable()
@@ -167,24 +169,4 @@ func main() {
 	go serveWhenIPAvailable(hotspotGateway, "hotspot", timeout, dnsserver.NewHandler(cfg, core.ViewHotspot, hotspotGateway))
 
 	log.Fatalf("[dns-provider] erro no servidor: %v", dnsserver.Serve("127.0.0.1:53", dnsserver.NewHandler(cfg, core.ViewHost, "")))
-}
-
-// serveWhenIPAvailable espera o IP informado existir como endereco real do
-// host antes de abrir o socket DNS - nunca fatal: se o IP nao aparecer a
-// tempo (gateway Docker/HOST_SOURCE_CIDR desatualizado, hotspot ainda nao
-// subiu), so loga e tenta de novo, sem derrubar o processo nem o servidor
-// de descoberta (ver comentario acima em main()).
-func serveWhenIPAvailable(ip, description string, timeout time.Duration, handler dns.HandlerFunc) {
-	for {
-		log.Printf("[dns-provider] aguardando IP de %s (%s) para abrir DNS em %s:53", description, ip, ip)
-		if err := netdetect.WaitForIPs([]string{ip}, timeout); err != nil {
-			log.Printf("[dns-provider] aviso: %v", err)
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		if err := dnsserver.Serve(ip+":53", handler); err != nil {
-			log.Printf("[dns-provider] aviso: DNS de %s (%s) encerrou: %v", description, ip, err)
-			time.Sleep(5 * time.Second)
-		}
-	}
 }

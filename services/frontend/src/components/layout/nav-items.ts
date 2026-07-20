@@ -1,4 +1,4 @@
-import { LayoutDashboard, Wifi, Globe, ShieldCheck, Network, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Wifi, Globe, ShieldCheck, Network, Settings, type LucideIcon } from "lucide-react";
 
 export interface NavItem {
   to: string;
@@ -13,4 +13,5 @@ export const navItems: NavItem[] = [
   { to: "/dns", label: "DNS", icon: Globe },
   { to: "/bindnets", label: "Bindnets", icon: Network },
   { to: "/certificates", label: "Certificados", icon: ShieldCheck },
+  { to: "/settings", label: "Configurações", icon: Settings },
 ];

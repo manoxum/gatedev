@@ -99,7 +99,7 @@ func issueCertificate(db *sql.DB, ca *localCA, rawDomains []string, validityQuan
 
 	log.Printf("[backend] certificado emitido para %s (%d dominio(s)/IP(s))", primary, len(domains))
 
-	if err := syncCertificateToNginxUI(primary, domains, string(certPEM), string(keyPEM)); err != nil {
+	if err := syncCertificateToNginxUI(db, primary, domains, string(certPEM), string(keyPEM)); err != nil {
 		log.Printf("[backend] falha ao carregar certificado de %s no nginx-ui: %v", primary, err)
 	}
 

@@ -20,6 +20,7 @@ import (
 	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/platform/config"
 	"bindnet/backend/internal/platform/db"
+	"bindnet/backend/internal/settings"
 	"bindnet/backend/internal/setup"
 	"bindnet/backend/internal/workerapi"
 )
@@ -38,6 +39,15 @@ func main() {
 		log.Fatalf("[backend] erro ao conectar no Postgres: %v", err)
 	}
 	defer database.Close()
+
+	// Traz para panel_config o que ainda estiver no ambiente do container
+	// (CA_COMMON_NAME, NGINX_UI_*). Roda antes de LoadOrImportCA de
+	// proposito: numa instalacao nova, o CN importado aqui e o que a CA
+	// recem-gerada vai usar. Depois disso o painel e a fonte de verdade e
+	// essas variaveis podem sair do .env.
+	if err := settings.ImportFromEnv(context.Background(), database); err != nil {
+		log.Printf("[backend] aviso: falha ao importar configuracao do painel do ambiente: %v", err)
+	}
 
 	ca, err := cert.LoadOrImportCA(database)
 	if err != nil {
@@ -64,6 +74,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	setup.RegisterSetupRoutes(mux, admin, database, auditClient)
+	settings.RegisterRoutes(mux, admin, database, auditClient)
 	auth.RegisterRoutes(mux, admin, auditClient)
 	setup.RegisterDashboardRoutes(mux, worker, admin)
 	hotspot.RegisterHotspotRoutes(mux, worker, admin, auditClient, database)

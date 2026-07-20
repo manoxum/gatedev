@@ -168,6 +168,3 @@ secrets:
   REDIS_PASSWORD:
     type: secret
     length: 32
-  NGINX_UI_PASSWORD:
-    type: secret
-    length: 0

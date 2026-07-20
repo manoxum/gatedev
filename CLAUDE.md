@@ -80,7 +80,15 @@ máquina do usuário da rede Wi-Fi ou da internet.
   `[nome-do-servico] mensagem` (veja `log()` em cada entrypoint).
   Siga esse padrão em código novo/alterado neste repo, inclusive nos
   logs Go de `services/backend` e `services/worker/controller`.
-- Variáveis de ambiente novas: sempre com valor padrão sensato via
+- **Configuração operacional (o que o operador ajusta) vai para o
+  Postgres, não para o `.env`**: tabelas chave/valor `hotspot_config`,
+  `dns_config` e `panel_config`, editadas pelo painel e lidas direto do
+  banco por cada serviço no boot. O `.env` fica só para o que é
+  infraestrutura/segredo de bootstrap (portas, credenciais de banco,
+  `DISCOVER_PORT`, `ADMIN_*`). Antes de criar uma variável de ambiente
+  nova, pergunte se ela não deveria ser uma chave numa dessas tabelas.
+- Variáveis de ambiente novas (as que realmente forem de
+  infraestrutura): sempre com valor padrão sensato via
   `${VAR:-padrao}` quando fizer sentido, documentadas em
   `.env.example` (com comentário explicando obrigatoriedade e efeito)
   e, se alterarem comportamento de negócio, descritas em `RULE.md`.

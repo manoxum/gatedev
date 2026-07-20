@@ -1,7 +1,7 @@
 // nginxui_local_store.go importa/remove certificados diretamente no
 // estado compartilhado do nginx-ui (database.db + /etc/nginx/ssl),
-// usado quando NGINX_UI_USERNAME/NGINX_UI_PASSWORD nao estao
-// configurados (ver syncCertificateToNginxUI em nginxui_sync.go).
+// usado quando as credenciais do nginx-ui nao estao
+// configuradas no painel (ver syncCertificateToNginxUI em nginxui_sync.go).
 package cert
 
 import (
@@ -152,7 +152,7 @@ func SyncIssuedCertificatesToNginxUI(db *sql.DB) error {
 		}
 		sanDomains := append(splitNonEmpty(dnsNames), splitNonEmpty(ipAddresses)...)
 		count++
-		if err := syncCertificateToNginxUI(domain, sanDomains, certificatePEM, privateKeyPEM); err != nil {
+		if err := syncCertificateToNginxUI(db, domain, sanDomains, certificatePEM, privateKeyPEM); err != nil {
 			failures++
 			log.Printf("[backend] falha ao importar certificado existente de %s no nginx-ui: %v", domain, err)
 		}

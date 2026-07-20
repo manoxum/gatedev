@@ -152,6 +152,30 @@ model HotspotConfig {
   @@map("hotspot_config")
 }
 
+// Configuracao do dns-provider preenchida pelo painel administrativo
+// (DNS_LOCAL_TLDS, DOMAINS, DISCOVER_NODE_NAME, DISCOVER_REMOTE_ROUTES).
+// Nao fica em .env.main/.env.example: o dns-provider le esta tabela direto
+// do Postgres quando inicia. DISCOVER_PORT continua env (porta de
+// infraestrutura, nao configuracao de negocio).
+model DnsConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("dns_config")
+}
+
+// Configuracao do proprio painel/backend (CA_COMMON_NAME,
+// NGINX_UI_USERNAME, NGINX_UI_PASSWORD), editada em Configuracoes.
+// NGINX_UI_URL continua env (endereco interno do container).
+model PanelConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("panel_config")
+}
+
 // Historico de sucesso/falha por combinacao (placa Wi-Fi, modo, banda,
 // canal) do hotspot (services/worker/hotspot/history.sh) - usado pra
 // priorizar, na proxima subida, os candidatos que ja funcionaram antes
