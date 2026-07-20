@@ -1,12 +1,12 @@
-package hotspot
+package store
 
 import "database/sql"
 
-// normalizeDeviceLimitUnits preenche "mbit"/"gbyte" nas unidades que
+// NormalizeDeviceLimitUnits preenche "mbit"/"gbyte" nas unidades que
 // vierem vazias no corpo do PATCH (frontend antigo, ou campo omitido) -
 // garante que nunca violamos o CHECK de unidade nem gravamos "" no
 // Postgres.
-func normalizeDeviceLimitUnits(limits hotspotLimits) hotspotLimits {
+func NormalizeDeviceLimitUnits(limits Limits) Limits {
 	if limits.DownloadRateUnit == "" {
 		limits.DownloadRateUnit = rateUnitMbit
 	}
@@ -14,7 +14,7 @@ func normalizeDeviceLimitUnits(limits hotspotLimits) hotspotLimits {
 		limits.UploadRateUnit = rateUnitMbit
 	}
 	if limits.LimitType == "" {
-		limits.LimitType = limitTypeUnlimited
+		limits.LimitType = LimitTypeUnlimited
 	}
 	// Cota e uma quantidade de dados, nao uma taxa - "gbyte" (nao
 	// "mbit") e o default sensato quando vier vazio.
@@ -30,8 +30,8 @@ func normalizeDeviceLimitUnits(limits hotspotLimits) hotspotLimits {
 	return limits
 }
 
-func getDeviceLimits(db *sql.DB, mac string) (hotspotLimits, bool, error) {
-	var limits hotspotLimits
+func GetDeviceLimits(db *sql.DB, mac string) (Limits, bool, error) {
+	var limits Limits
 	err := db.QueryRow(`
 		SELECT download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
 		       limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
@@ -41,16 +41,16 @@ func getDeviceLimits(db *sql.DB, mac string) (hotspotLimits, bool, error) {
 		&limits.LimitType, &limits.DailyQuotaBytes, &limits.DailyQuotaUnit, &limits.WeeklyQuotaBytes, &limits.WeeklyQuotaUnit,
 		&limits.MonthlyQuotaBytes, &limits.MonthlyQuotaUnit)
 	if err == sql.ErrNoRows {
-		return hotspotLimits{}, false, nil
+		return Limits{}, false, nil
 	}
 	if err != nil {
-		return hotspotLimits{}, false, err
+		return Limits{}, false, err
 	}
-	return normalizeDeviceLimitUnits(limits), true, nil
+	return NormalizeDeviceLimitUnits(limits), true, nil
 }
 
-func upsertDeviceLimits(db *sql.DB, mac string, limits hotspotLimits) error {
-	limits = normalizeDeviceLimitUnits(limits)
+func UpsertDeviceLimits(db *sql.DB, mac string, limits Limits) error {
+	limits = NormalizeDeviceLimitUnits(limits)
 	_, err := db.Exec(`
 		INSERT INTO hotspot_device_limits (mac_address, download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
 		                                    limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
@@ -81,7 +81,7 @@ func upsertDeviceLimits(db *sql.DB, mac string, limits hotspotLimits) error {
 // ativar o modo credito automaticamente: e a unica acao de auto-servico
 // do usuario final, sem acesso ao painel para trocar o tipo manualmente
 // pela aba de limites.
-func setDeviceLimitType(db *sql.DB, mac string, t limitType) error {
+func setDeviceLimitType(db *sql.DB, mac string, t LimitType) error {
 	_, err := db.Exec(`
 		INSERT INTO hotspot_device_limits (mac_address, limit_type)
 		VALUES ($1, $2)

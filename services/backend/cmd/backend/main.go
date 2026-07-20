@@ -17,6 +17,7 @@ import (
 	"bindnet/backend/internal/cert"
 	"bindnet/backend/internal/dns"
 	"bindnet/backend/internal/hotspot"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/platform/config"
 	"bindnet/backend/internal/platform/db"
 	"bindnet/backend/internal/setup"
@@ -52,7 +53,7 @@ func main() {
 	}
 	defer auditClient.Disconnect(context.Background())
 
-	creditTrace, err := hotspot.OpenCreditTrace(context.Background(), auditClient.MongoClient())
+	creditTrace, err := store.OpenCreditTrace(context.Background(), auditClient.MongoClient())
 	if err != nil {
 		log.Fatalf("[backend] erro ao preparar trace de consumo de credito no Mongo: %v", err)
 	}

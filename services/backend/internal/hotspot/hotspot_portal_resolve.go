@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/platform/config"
 	"bindnet/backend/internal/workerapi"
 	"context"
@@ -19,7 +20,7 @@ func resolvePortalMAC(ctx context.Context, r *http.Request, db *sql.DB, worker *
 		return "", errPortalDeviceNotIdentified
 	}
 
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] portal: falha ao ler WIFI_INTERFACE para identificar %s: %v", ip, err)
 		return "", errPortalDeviceNotIdentified
@@ -53,12 +54,12 @@ func resolvePortalMAC(ctx context.Context, r *http.Request, db *sql.DB, worker *
 
 // hotspotPortalURL monta o endereco publico da pagina de
 // autoatendimento a partir do HOTSPOT_GATEWAY configurado (mesma
-// config lida por hotspotWifiInterface) - usado pelo worker como alvo
+// config lida por store.HotspotWifiInterface) - usado pelo worker como alvo
 // do redirect do portal cativo (ver applyCaptivePortalRedirect em
 // hotspot_credit_recharge.go). FRONTEND_PORT segue o mesmo default
 // (9090) do docker-compose.services.yml.
 func hotspotPortalURL(ctx context.Context, db *sql.DB) (string, error) {
-	hotspotCfg, err := GetHotspotConfig(ctx, db)
+	hotspotCfg, err := store.GetHotspotConfig(ctx, db)
 	if err != nil {
 		return "", err
 	}

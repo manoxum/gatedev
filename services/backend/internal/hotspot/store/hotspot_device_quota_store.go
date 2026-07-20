@@ -1,4 +1,4 @@
-package hotspot
+package store
 
 import (
 	"database/sql"
@@ -11,7 +11,7 @@ const (
 	quotaPeriodMonthly = "monthly"
 )
 
-func isValidQuotaPeriodType(t string) bool {
+func IsValidQuotaPeriodType(t string) bool {
 	switch t {
 	case quotaPeriodDaily, quotaPeriodWeekly, quotaPeriodMonthly:
 		return true
@@ -20,13 +20,13 @@ func isValidQuotaPeriodType(t string) bool {
 	}
 }
 
-// hotspotDeviceQuotaPeriod e o acumulado do periodo corrente de UM dos
+// HotspotDeviceQuotaPeriod e o acumulado do periodo corrente de UM dos
 // 3 tetos possiveis (diario/semanal/mensal) de UM dispositivo - so
 // existe linha para o periodo que o admin efetivamente configurou (ver
-// ensureDeviceQuotaPeriodRow), nunca as 3 de uma vez se so 1 ou 2
+// EnsureDeviceQuotaPeriodRow), nunca as 3 de uma vez se so 1 ou 2
 // estiverem em uso. "Blocked" e bloqueio rigido (nunca throttle) - ver
 // reconcileDeviceQuota.
-type hotspotDeviceQuotaPeriod struct {
+type HotspotDeviceQuotaPeriod struct {
 	MACAddress    string
 	PeriodType    string
 	DownloadBytes int64
@@ -36,8 +36,8 @@ type hotspotDeviceQuotaPeriod struct {
 	Blocked       bool
 }
 
-func ensureDeviceQuotaPeriodRow(db *sql.DB, mac, periodType string) (hotspotDeviceQuotaPeriod, error) {
-	var p hotspotDeviceQuotaPeriod
+func EnsureDeviceQuotaPeriodRow(db *sql.DB, mac, periodType string) (HotspotDeviceQuotaPeriod, error) {
+	var p HotspotDeviceQuotaPeriod
 	err := db.QueryRow(`
 		INSERT INTO hotspot_device_quota_periods (mac_address, period_type)
 		VALUES ($1, $2)
@@ -48,10 +48,10 @@ func ensureDeviceQuotaPeriodRow(db *sql.DB, mac, periodType string) (hotspotDevi
 	return p, err
 }
 
-// resetDeviceQuotaPeriodIfExpired e o equivalente por periodo de
+// ResetDeviceQuotaPeriodIfExpired e o equivalente por periodo de
 // resetGlobalPeriodIfExpired (hotspot_quota.go) - reusa o mesmo
 // periodInterval (whitelist fixa "daily"/"weekly"/"monthly").
-func resetDeviceQuotaPeriodIfExpired(db *sql.DB, mac, periodType string) error {
+func ResetDeviceQuotaPeriodIfExpired(db *sql.DB, mac, periodType string) error {
 	_, err := db.Exec(`
 		UPDATE hotspot_device_quota_periods
 		SET download_bytes = 0, upload_bytes = 0, blocked = false,
@@ -62,13 +62,13 @@ func resetDeviceQuotaPeriodIfExpired(db *sql.DB, mac, periodType string) error {
 	return err
 }
 
-// resetDeviceQuotaPeriodNow e a acao manual do botao "Resetar" (ver
+// ResetDeviceQuotaPeriodNow e a acao manual do botao "Resetar" (ver
 // requisito de reset por periodo) - zera o acumulado e reinicia a
 // janela a partir de agora, mesmo que o periodo atual ainda nao tenha
 // expirado. Nao desbloqueia sozinho o dispositivo (outro periodo
 // configurado pode continuar estourado) - quem decide isso e
 // reconcileDeviceQuota no proximo ciclo/aplicacao ao vivo.
-func resetDeviceQuotaPeriodNow(db *sql.DB, mac, periodType string) error {
+func ResetDeviceQuotaPeriodNow(db *sql.DB, mac, periodType string) error {
 	_, err := db.Exec(`
 		UPDATE hotspot_device_quota_periods
 		SET download_bytes = 0, upload_bytes = 0, blocked = false,
@@ -80,8 +80,8 @@ func resetDeviceQuotaPeriodNow(db *sql.DB, mac, periodType string) error {
 	return err
 }
 
-func incrementDeviceQuotaPeriod(db *sql.DB, mac, periodType string, deltaDown, deltaUp int64) (hotspotDeviceQuotaPeriod, error) {
-	var p hotspotDeviceQuotaPeriod
+func IncrementDeviceQuotaPeriod(db *sql.DB, mac, periodType string, deltaDown, deltaUp int64) (HotspotDeviceQuotaPeriod, error) {
+	var p HotspotDeviceQuotaPeriod
 	err := db.QueryRow(`
 		UPDATE hotspot_device_quota_periods
 		SET download_bytes = download_bytes + $3, upload_bytes = upload_bytes + $4, updated_at = CURRENT_TIMESTAMP
@@ -92,7 +92,7 @@ func incrementDeviceQuotaPeriod(db *sql.DB, mac, periodType string, deltaDown, d
 	return p, err
 }
 
-func setDeviceQuotaPeriodBlocked(db *sql.DB, mac, periodType string, blocked bool) error {
+func SetDeviceQuotaPeriodBlocked(db *sql.DB, mac, periodType string, blocked bool) error {
 	_, err := db.Exec(`
 		UPDATE hotspot_device_quota_periods SET blocked = $3, updated_at = CURRENT_TIMESTAMP
 		WHERE mac_address = $1 AND period_type = $2
@@ -100,27 +100,27 @@ func setDeviceQuotaPeriodBlocked(db *sql.DB, mac, periodType string, blocked boo
 	return err
 }
 
-func deviceQuotaPeriodExceeded(quotaBytes *int64, usage hotspotDeviceQuotaPeriod) bool {
+func DeviceQuotaPeriodExceeded(quotaBytes *int64, usage HotspotDeviceQuotaPeriod) bool {
 	if quotaBytes == nil {
 		return false
 	}
 	return usage.DownloadBytes+usage.UploadBytes >= *quotaBytes
 }
 
-// configuredQuotaPeriods devolve os pares (tipo, teto) dos periodos que
+// ConfiguredQuotaPeriods devolve os pares (tipo, teto) dos periodos que
 // o admin efetivamente configurou em limits (ignora os que ficaram
 // nil) - usada tanto por reconcileDeviceQuota quanto por
 // listDeviceQuotaPeriods, pra nunca duas listas saírem dessincronizadas
 // de quais periodos "contam".
-func configuredQuotaPeriods(limits hotspotLimits) []struct {
+func ConfiguredQuotaPeriods(limits Limits) []struct {
 	Type  string
 	Quota *int64
-	Unit  rateUnit
+	Unit  RateUnit
 } {
 	all := []struct {
 		Type  string
 		Quota *int64
-		Unit  rateUnit
+		Unit  RateUnit
 	}{
 		{quotaPeriodDaily, limits.DailyQuotaBytes, limits.DailyQuotaUnit},
 		{quotaPeriodWeekly, limits.WeeklyQuotaBytes, limits.WeeklyQuotaUnit},
@@ -129,7 +129,7 @@ func configuredQuotaPeriods(limits hotspotLimits) []struct {
 	configured := make([]struct {
 		Type  string
 		Quota *int64
-		Unit  rateUnit
+		Unit  RateUnit
 	}, 0, len(all))
 	for _, p := range all {
 		if p.Quota != nil {
@@ -144,5 +144,5 @@ func configuredQuotaPeriods(limits hotspotLimits) []struct {
 // incrementa com o trafego deste ciclo, e bloqueia ao vivo (mesma
 // infra do bloqueio por credito - applyLiveTrafficBlock +
 // applyCaptivePortalRedirect) assim que QUALQUER periodo configurado
-// estoura. So chamada quando limits.LimitType == limitTypeQuota (ver
+// estoura. So chamada quando limits.LimitType == LimitTypeQuota (ver
 // hotspot_reconcile.go).

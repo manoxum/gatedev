@@ -1,4 +1,4 @@
-package hotspot
+package store
 
 import (
 	"database/sql"
@@ -7,13 +7,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// errHotspotAliasTaken e devolvido por updateHotspotDeviceIdentity
+// ErrHotspotAliasTaken e devolvido por UpdateHotspotDeviceIdentity
 // quando o alias ja esta em uso por outro dispositivo (violacao da
 // constraint UNIQUE em hotspot_device_info.alias) - o handler HTTP
 // traduz isso pra 409 Conflict.
-var errHotspotAliasTaken = errors.New("alias ja esta em uso por outro dispositivo")
+var ErrHotspotAliasTaken = errors.New("alias ja esta em uso por outro dispositivo")
 
-func hotspotDeviceInfoMap(db *sql.DB) (map[string]hotspotDeviceInfo, error) {
+func HotspotDeviceInfoMap(db *sql.DB) (map[string]DeviceInfo, error) {
 	rows, err := db.Query(`
 		SELECT mac_address, vendor, device_name, os_name, confidence, alias
 		FROM hotspot_device_info
@@ -23,9 +23,9 @@ func hotspotDeviceInfoMap(db *sql.DB) (map[string]hotspotDeviceInfo, error) {
 	}
 	defer rows.Close()
 
-	infos := map[string]hotspotDeviceInfo{}
+	infos := map[string]DeviceInfo{}
 	for rows.Next() {
-		var info hotspotDeviceInfo
+		var info DeviceInfo
 		if err := rows.Scan(&info.MACAddress, &info.Vendor, &info.DeviceName, &info.OSName, &info.Confidence, &info.Alias); err != nil {
 			return nil, err
 		}
@@ -34,27 +34,27 @@ func hotspotDeviceInfoMap(db *sql.DB) (map[string]hotspotDeviceInfo, error) {
 	return infos, rows.Err()
 }
 
-func hotspotDeviceInfoByMAC(db *sql.DB, mac string) (hotspotDeviceInfo, bool, error) {
-	var info hotspotDeviceInfo
+func HotspotDeviceInfoByMAC(db *sql.DB, mac string) (DeviceInfo, bool, error) {
+	var info DeviceInfo
 	err := db.QueryRow(`
 		SELECT mac_address, vendor, device_name, os_name, confidence, alias
 		FROM hotspot_device_info
 		WHERE mac_address = $1
 	`, mac).Scan(&info.MACAddress, &info.Vendor, &info.DeviceName, &info.OSName, &info.Confidence, &info.Alias)
 	if err == nil {
-		return info, hotspotDeviceInfoHasData(info), nil
+		return info, HotspotDeviceInfoHasData(info), nil
 	}
 	if err == sql.ErrNoRows {
-		return hotspotDeviceInfo{}, false, nil
+		return DeviceInfo{}, false, nil
 	}
-	return hotspotDeviceInfo{}, false, err
+	return DeviceInfo{}, false, err
 }
 
-// hotspotIdentityEdit e um patch parcial dos campos editaveis a mao
+// HotspotIdentityEdit e um patch parcial dos campos editaveis a mao
 // pelo admin (modal "Identificar" no frontend) - ponteiro nil = campo
 // omitido no corpo do PATCH, mantem o valor atual; ponteiro apontando
-// para "" = limpa o campo explicitamente. Ver updateHotspotDeviceIdentity.
-type hotspotIdentityEdit struct {
+// para "" = limpa o campo explicitamente. Ver UpdateHotspotDeviceIdentity.
+type HotspotIdentityEdit struct {
 	Alias      *string
 	Vendor     *string
 	DeviceName *string
@@ -68,15 +68,15 @@ func mergeNullableString(current sql.NullString, override *string) sql.NullStrin
 	return sql.NullString{String: *override, Valid: *override != ""}
 }
 
-// updateHotspotDeviceIdentity grava edicoes manuais de alias/vendor/
+// UpdateHotspotDeviceIdentity grava edicoes manuais de alias/vendor/
 // deviceName/osName - so mexe nos campos presentes em edit (os demais
 // preservam o valor atual, lido primeiro do banco), ao contrario de
-// upsertHotspotDeviceInfo (fluxo automatico de "Buscar
+// UpsertHotspotDeviceInfo (fluxo automatico de "Buscar
 // automaticamente", que sempre substitui os 3 campos + confidence
 // juntos). Edicao manual marca confidence=100 quando vendor/deviceName/
 // osName ficam preenchidos (sinaliza "definido a mao", nao heuristica).
-func updateHotspotDeviceIdentity(db *sql.DB, mac string, edit hotspotIdentityEdit) error {
-	current, _, err := hotspotDeviceInfoByMAC(db, mac)
+func UpdateHotspotDeviceIdentity(db *sql.DB, mac string, edit HotspotIdentityEdit) error {
+	current, _, err := HotspotDeviceInfoByMAC(db, mac)
 	if err != nil {
 		return err
 	}
@@ -108,21 +108,21 @@ func updateHotspotDeviceIdentity(db *sql.DB, mac string, edit hotspotIdentityEdi
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return errHotspotAliasTaken
+			return ErrHotspotAliasTaken
 		}
 		return err
 	}
 	return nil
 }
 
-func hotspotDeviceInfoHasData(info hotspotDeviceInfo) bool {
+func HotspotDeviceInfoHasData(info DeviceInfo) bool {
 	return (info.Vendor.Valid && info.Vendor.String != "") ||
 		(info.DeviceName.Valid && info.DeviceName.String != "") ||
 		(info.OSName.Valid && info.OSName.String != "") ||
 		info.Confidence.Valid
 }
 
-func upsertHotspotDeviceInfo(db *sql.DB, info hotspotDeviceInfo) error {
+func UpsertHotspotDeviceInfo(db *sql.DB, info DeviceInfo) error {
 	_, err := db.Exec(`
 		INSERT INTO hotspot_device_info (mac_address, vendor, device_name, os_name, confidence, fetched_at)
 		VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
@@ -136,13 +136,13 @@ func upsertHotspotDeviceInfo(db *sql.DB, info hotspotDeviceInfo) error {
 	return err
 }
 
-// recordDeviceSeen marca que o MAC apareceu na lista de clientes ao
+// RecordDeviceSeen marca que o MAC apareceu na lista de clientes ao
 // vivo agora - chamado a cada listagem de clientes
 // (listEnrichedHotspotClients). first_seen_at so e gravado na
 // primeira vez (INSERT); conflitos so atualizam last_seen_at, nunca
 // mexem em vendor/device_name/os_name/alias/confidence (campos
 // exclusivos dos fluxos de identificacao/edicao manual).
-func recordDeviceSeen(db *sql.DB, mac string) error {
+func RecordDeviceSeen(db *sql.DB, mac string) error {
 	_, err := db.Exec(`
 		INSERT INTO hotspot_device_info (mac_address, first_seen_at, last_seen_at)
 		VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -151,10 +151,10 @@ func recordDeviceSeen(db *sql.DB, mac string) error {
 	return err
 }
 
-// listKnownHotspotDevices devolve todo dispositivo ja visto conectado
+// ListKnownHotspotDevices devolve todo dispositivo ja visto conectado
 // alguma vez (first_seen_at nao nulo - exclui linhas criadas so por
 // identificacao/alias manual num MAC que nunca chegou a conectar).
-func listKnownHotspotDevices(db *sql.DB) ([]hotspotKnownDevice, error) {
+func ListKnownHotspotDevices(db *sql.DB) ([]KnownDevice, error) {
 	rows, err := db.Query(`
 		SELECT mac_address, vendor, device_name, os_name, alias, first_seen_at, last_seen_at
 		FROM hotspot_device_info
@@ -166,9 +166,9 @@ func listKnownHotspotDevices(db *sql.DB) ([]hotspotKnownDevice, error) {
 	}
 	defer rows.Close()
 
-	devices := []hotspotKnownDevice{}
+	devices := []KnownDevice{}
 	for rows.Next() {
-		var device hotspotKnownDevice
+		var device KnownDevice
 		if err := rows.Scan(&device.MACAddress, &device.Vendor, &device.DeviceName, &device.OSName,
 			&device.Alias, &device.FirstSeenAt, &device.LastSeenAt); err != nil {
 			return nil, err

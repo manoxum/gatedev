@@ -10,6 +10,7 @@ package hotspot
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"database/sql"
 	"encoding/json"
@@ -18,31 +19,13 @@ import (
 	"net/http"
 )
 
-type hotspotProfile struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	IsDefault bool   `json:"isDefault"`
-	hotspotLimits
-	CreditRechargeAmountBytes *int64  `json:"creditRechargeAmountBytes"`
-	CreditRechargePeriod      *string `json:"creditRechargePeriod"`
-	CreditPlafondBytes        *int64  `json:"creditPlafondBytes"`
-}
-
-type hotspotProfileRequest struct {
-	Name string `json:"name"`
-	hotspotLimits
-	CreditRechargeAmountBytes *int64  `json:"creditRechargeAmountBytes"`
-	CreditRechargePeriod      *string `json:"creditRechargePeriod"`
-	CreditPlafondBytes        *int64  `json:"creditPlafondBytes"`
-}
-
 type hotspotDeviceProfileRequest struct {
 	ProfileID string `json:"profileId"`
 }
 
 func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sql.DB, worker *workerapi.Client, audit *audit.Client) {
 	mux.HandleFunc("GET /api/hotspot/profiles", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		profiles, err := listProfiles(db)
+		profiles, err := store.ListProfiles(db)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -52,17 +35,17 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 	}))
 
 	mux.HandleFunc("POST /api/hotspot/profiles", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		var req hotspotProfileRequest
+		var req store.ProfileRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 			http.Error(w, "campo 'name' obrigatorio", http.StatusBadRequest)
 			return
 		}
-		if req.LimitType != "" && !isValidLimitType(req.LimitType, true) {
+		if req.LimitType != "" && !store.IsValidLimitType(req.LimitType, true) {
 			http.Error(w, "campo 'limitType' invalido", http.StatusBadRequest)
 			return
 		}
-		profile, err := insertProfile(db, req)
-		if errors.Is(err, errHotspotProfileNameTaken) {
+		profile, err := store.InsertProfile(db, req)
+		if errors.Is(err, store.ErrHotspotProfileNameTaken) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -78,7 +61,7 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 	}))
 
 	mux.HandleFunc("GET /api/hotspot/profiles/{id}", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		profile, found, err := getProfile(db, r.PathValue("id"))
+		profile, found, err := store.GetProfile(db, r.PathValue("id"))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -93,17 +76,17 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 
 	mux.HandleFunc("PATCH /api/hotspot/profiles/{id}", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		var req hotspotProfileRequest
+		var req store.ProfileRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 			http.Error(w, "campo 'name' obrigatorio", http.StatusBadRequest)
 			return
 		}
-		if req.LimitType != "" && !isValidLimitType(req.LimitType, true) {
+		if req.LimitType != "" && !store.IsValidLimitType(req.LimitType, true) {
 			http.Error(w, "campo 'limitType' invalido", http.StatusBadRequest)
 			return
 		}
-		profile, found, err := updateProfile(db, id, req)
-		if errors.Is(err, errHotspotProfileNameTaken) {
+		profile, found, err := store.UpdateProfile(db, id, req)
+		if errors.Is(err, store.ErrHotspotProfileNameTaken) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -124,7 +107,7 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 
 	mux.HandleFunc("DELETE /api/hotspot/profiles/{id}", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if err := deleteProfile(db, id); errors.Is(err, errHotspotProfileIsDefault) {
+		if err := store.DeleteProfile(db, id); errors.Is(err, store.ErrHotspotProfileIsDefault) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		} else if err != nil {
@@ -147,7 +130,7 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 			http.Error(w, "campo 'profileId' obrigatorio", http.StatusBadRequest)
 			return
 		}
-		if _, found, err := getProfile(db, req.ProfileID); err != nil {
+		if _, found, err := store.GetProfile(db, req.ProfileID); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		} else if !found {

@@ -2,6 +2,7 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -45,26 +46,26 @@ func RegisterHotspotDeviceIdentityRoute(mux *http.ServeMux, admin *auth.Administ
 			http.Error(w, "corpo invalido", http.StatusBadRequest)
 			return
 		}
-		edit := hotspotIdentityEdit{
+		edit := store.HotspotIdentityEdit{
 			Alias:      trimmedPointer(req.Alias),
 			Vendor:     trimmedPointer(req.Vendor),
 			DeviceName: trimmedPointer(req.DeviceName),
 			OSName:     trimmedPointer(req.OSName),
 		}
-		if err := updateHotspotDeviceIdentity(db, mac, edit); err != nil {
-			if errors.Is(err, errHotspotAliasTaken) {
+		if err := store.UpdateHotspotDeviceIdentity(db, mac, edit); err != nil {
+			if errors.Is(err, store.ErrHotspotAliasTaken) {
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		info, _, err := hotspotDeviceInfoByMAC(db, mac)
+		info, _, err := store.HotspotDeviceInfoByMAC(db, mac)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, blockReasonNone))
+		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, store.BlockReasonNone))
 	}))
 }

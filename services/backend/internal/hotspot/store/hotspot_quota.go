@@ -1,4 +1,4 @@
-package hotspot
+package store
 
 import "database/sql"
 
@@ -14,14 +14,14 @@ func counterDelta(last int64, current uint64) int64 {
 	return currentSigned - last
 }
 
-// recordDeviceUsage soma o delta desde a ultima leitura aos contadores
+// RecordDeviceUsage soma o delta desde a ultima leitura aos contadores
 // absolutos e devolve os proprios deltas - o loop de reconciliacao usa
 // esse retorno para debitar o trafego deste ciclo do saldo de credito
 // e/ou incrementar os acumuladores por periodo de cota (ver
 // hotspot_device_quota_store.go), sem reler nada mais. Nao acumula
 // download_bytes/upload_bytes aqui (colunas legadas, sem leitor Go daqui
 // pra frente - ver comentario em hotspot_device_traffic no schema.prisma).
-func recordDeviceUsage(db *sql.DB, mac string, downloadCounter, uploadCounter uint64) (deltaDown, deltaUp int64, err error) {
+func RecordDeviceUsage(db *sql.DB, mac string, downloadCounter, uploadCounter uint64) (deltaDown, deltaUp int64, err error) {
 	traffic, err := ensureDeviceTrafficRow(db, mac)
 	if err != nil {
 		return 0, 0, err
@@ -41,13 +41,13 @@ func recordDeviceUsage(db *sql.DB, mac string, downloadCounter, uploadCounter ui
 	return deltaDown, deltaUp, nil
 }
 
-// recordGlobalUsage e o equivalente global de recordDeviceUsage -
+// RecordGlobalUsage e o equivalente global de RecordDeviceUsage -
 // devolve os deltas usados pra alimentar o velocimetro/grafico geral
 // (ver reconcileGlobalUsage em hotspot_usage_sampling.go). Ainda
 // acumula download_bytes/upload_bytes por compatibilidade com a coluna
 // existente, mas nada mais le esses dois campos (o limite/cota global
 // foi removido - ver RULE.md).
-func recordGlobalUsage(db *sql.DB, downloadCounter, uploadCounter uint64) (deltaDown, deltaUp int64, err error) {
+func RecordGlobalUsage(db *sql.DB, downloadCounter, uploadCounter uint64) (deltaDown, deltaUp int64, err error) {
 	traffic, err := ensureGlobalTrafficRow(db)
 	if err != nil {
 		return 0, 0, err

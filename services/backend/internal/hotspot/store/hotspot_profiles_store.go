@@ -1,20 +1,20 @@
-package hotspot
+package store
 
 import (
 	"database/sql"
 	"errors"
 )
 
-// errHotspotProfileNameTaken e devolvido por insertProfile/updateProfile
+// ErrHotspotProfileNameTaken e devolvido por InsertProfile/UpdateProfile
 // quando o nome ja esta em uso por outro perfil (violacao da constraint
 // UNIQUE em hotspot_profiles.name) - o handler HTTP traduz isso pra 409.
-var errHotspotProfileNameTaken = errors.New("ja existe um perfil com esse nome")
+var ErrHotspotProfileNameTaken = errors.New("ja existe um perfil com esse nome")
 
-// errHotspotProfileIsDefault e devolvido por deleteProfile quando o
+// ErrHotspotProfileIsDefault e devolvido por DeleteProfile quando o
 // alvo e o perfil "Padrao" semeado pela migration - protegido a nivel
 // de app (nao ha CHECK no banco que impeca deletar a linha is_default,
 // so o indice unico que garante no maximo um is_default=true).
-var errHotspotProfileIsDefault = errors.New("o perfil padrao nao pode ser removido")
+var ErrHotspotProfileIsDefault = errors.New("o perfil padrao nao pode ser removido")
 
 const profileColumns = `
 	id, name, is_default,
@@ -24,28 +24,28 @@ const profileColumns = `
 	credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes
 `
 
-func scanProfile(row interface{ Scan(...any) error }) (hotspotProfile, error) {
-	var p hotspotProfile
+func scanProfile(row interface{ Scan(...any) error }) (Profile, error) {
+	var p Profile
 	err := row.Scan(&p.ID, &p.Name, &p.IsDefault,
 		&p.DownloadRateValue, &p.DownloadRateUnit, &p.UploadRateValue, &p.UploadRateUnit,
 		&p.LimitType, &p.DailyQuotaBytes, &p.DailyQuotaUnit, &p.WeeklyQuotaBytes, &p.WeeklyQuotaUnit,
 		&p.MonthlyQuotaBytes, &p.MonthlyQuotaUnit,
 		&p.CreditRechargeAmountBytes, &p.CreditRechargePeriod, &p.CreditPlafondBytes)
 	if err != nil {
-		return hotspotProfile{}, err
+		return Profile{}, err
 	}
-	p.hotspotLimits = normalizeDeviceLimitUnits(p.hotspotLimits)
+	p.Limits = NormalizeDeviceLimitUnits(p.Limits)
 	return p, nil
 }
 
-func listProfiles(db *sql.DB) ([]hotspotProfile, error) {
+func ListProfiles(db *sql.DB) ([]Profile, error) {
 	rows, err := db.Query(`SELECT ` + profileColumns + ` FROM hotspot_profiles ORDER BY is_default DESC, name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	profiles := []hotspotProfile{}
+	profiles := []Profile{}
 	for rows.Next() {
 		profile, err := scanProfile(rows)
 		if err != nil {
@@ -56,19 +56,19 @@ func listProfiles(db *sql.DB) ([]hotspotProfile, error) {
 	return profiles, rows.Err()
 }
 
-func getProfile(db *sql.DB, id string) (hotspotProfile, bool, error) {
+func GetProfile(db *sql.DB, id string) (Profile, bool, error) {
 	profile, err := scanProfile(db.QueryRow(`SELECT `+profileColumns+` FROM hotspot_profiles WHERE id = $1`, id))
 	if err == sql.ErrNoRows {
-		return hotspotProfile{}, false, nil
+		return Profile{}, false, nil
 	}
 	if err != nil {
-		return hotspotProfile{}, false, err
+		return Profile{}, false, err
 	}
 	return profile, true, nil
 }
 
-func insertProfile(db *sql.DB, req hotspotProfileRequest) (hotspotProfile, error) {
-	req.hotspotLimits = normalizeDeviceLimitUnits(req.hotspotLimits)
+func InsertProfile(db *sql.DB, req ProfileRequest) (Profile, error) {
+	req.Limits = NormalizeDeviceLimitUnits(req.Limits)
 	profile, err := scanProfile(db.QueryRow(`
 		INSERT INTO hotspot_profiles (
 			name, download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
@@ -84,13 +84,13 @@ func insertProfile(db *sql.DB, req hotspotProfileRequest) (hotspotProfile, error
 		req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
 	))
 	if isUniqueViolation(err) {
-		return hotspotProfile{}, errHotspotProfileNameTaken
+		return Profile{}, ErrHotspotProfileNameTaken
 	}
 	return profile, err
 }
 
-func updateProfile(db *sql.DB, id string, req hotspotProfileRequest) (hotspotProfile, bool, error) {
-	req.hotspotLimits = normalizeDeviceLimitUnits(req.hotspotLimits)
+func UpdateProfile(db *sql.DB, id string, req ProfileRequest) (Profile, bool, error) {
+	req.Limits = NormalizeDeviceLimitUnits(req.Limits)
 	profile, err := scanProfile(db.QueryRow(`
 		UPDATE hotspot_profiles
 		SET name = $2, download_rate_value = $3, download_rate_unit = $4, upload_rate_value = $5, upload_rate_unit = $6,
@@ -106,21 +106,21 @@ func updateProfile(db *sql.DB, id string, req hotspotProfileRequest) (hotspotPro
 		req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
 	))
 	if isUniqueViolation(err) {
-		return hotspotProfile{}, false, errHotspotProfileNameTaken
+		return Profile{}, false, ErrHotspotProfileNameTaken
 	}
 	if err == sql.ErrNoRows {
-		return hotspotProfile{}, false, nil
+		return Profile{}, false, nil
 	}
 	if err != nil {
-		return hotspotProfile{}, false, err
+		return Profile{}, false, err
 	}
 	return profile, true, nil
 }
 
-// deleteProfile reatribui todo dispositivo vinculado ao perfil Padrao
+// DeleteProfile reatribui todo dispositivo vinculado ao perfil Padrao
 // antes de apagar - nunca deixa hotspot_device_info.profile_id
 // apontando para um perfil que nao existe mais.
-func deleteProfile(db *sql.DB, id string) error {
+func DeleteProfile(db *sql.DB, id string) error {
 	var isDefault bool
 	if err := db.QueryRow(`SELECT is_default FROM hotspot_profiles WHERE id = $1`, id).Scan(&isDefault); err == sql.ErrNoRows {
 		return nil
@@ -128,7 +128,7 @@ func deleteProfile(db *sql.DB, id string) error {
 		return err
 	}
 	if isDefault {
-		return errHotspotProfileIsDefault
+		return ErrHotspotProfileIsDefault
 	}
 
 	tx, err := db.Begin()
@@ -137,7 +137,7 @@ func deleteProfile(db *sql.DB, id string) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`UPDATE hotspot_device_info SET profile_id = $1 WHERE profile_id = $2`, defaultProfileID, id); err != nil {
+	if _, err := tx.Exec(`UPDATE hotspot_device_info SET profile_id = $1 WHERE profile_id = $2`, DefaultProfileID, id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM hotspot_profiles WHERE id = $1`, id); err != nil {
@@ -146,8 +146,8 @@ func deleteProfile(db *sql.DB, id string) error {
 	return tx.Commit()
 }
 
-func getProfileLimits(db *sql.DB, id string) (hotspotLimits, bool, error) {
-	var limits hotspotLimits
+func GetProfileLimits(db *sql.DB, id string) (Limits, bool, error) {
+	var limits Limits
 	err := db.QueryRow(`
 		SELECT download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
 		       limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
@@ -157,10 +157,10 @@ func getProfileLimits(db *sql.DB, id string) (hotspotLimits, bool, error) {
 		&limits.LimitType, &limits.DailyQuotaBytes, &limits.DailyQuotaUnit, &limits.WeeklyQuotaBytes, &limits.WeeklyQuotaUnit,
 		&limits.MonthlyQuotaBytes, &limits.MonthlyQuotaUnit)
 	if err == sql.ErrNoRows {
-		return hotspotLimits{}, false, nil
+		return Limits{}, false, nil
 	}
 	if err != nil {
-		return hotspotLimits{}, false, err
+		return Limits{}, false, err
 	}
-	return normalizeDeviceLimitUnits(limits), true, nil
+	return NormalizeDeviceLimitUnits(limits), true, nil
 }

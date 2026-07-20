@@ -1,7 +1,7 @@
 // hotspot_voucher_codes.go gera os identificadores aleatorios usados
 // por vouchers e lotes (services/backend/hotspot_vouchers.go e
 // hotspot_voucher_batches.go).
-package hotspot
+package store
 
 import (
 	"crypto/rand"
@@ -24,11 +24,11 @@ func generateVoucherCode() (string, error) {
 	return hexCode[0:4] + "-" + hexCode[4:8] + "-" + hexCode[8:12], nil
 }
 
-// generateVoucherBatchID gera um identificador de 16 caracteres
+// GenerateVoucherBatchID gera um identificador de 16 caracteres
 // hexadecimais (64 bits de entropia via crypto/rand) para uso na URL
 // da pagina de detalhe do lote - sem os hifens do codigo do voucher
 // porque este nao e digitado manualmente por ninguem.
-func generateVoucherBatchID() (string, error) {
+func GenerateVoucherBatchID() (string, error) {
 	raw := make([]byte, 8)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -36,17 +36,17 @@ func generateVoucherBatchID() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-// insertVoucherWithRetry tenta algumas vezes em caso de colisao de
+// InsertVoucherWithRetry tenta algumas vezes em caso de colisao de
 // codigo (extremamente improvavel com 96 bits de entropia, mas o custo
 // de tratar e minimo) antes de desistir.
-func insertVoucherWithRetry(db *sql.DB, batchID string, amountBytes int64, note string) (hotspotVoucher, error) {
+func InsertVoucherWithRetry(db *sql.DB, batchID string, amountBytes int64, note string) (Voucher, error) {
 	var lastErr error
 	for attempt := 0; attempt < 5; attempt++ {
 		code, err := generateVoucherCode()
 		if err != nil {
-			return hotspotVoucher{}, err
+			return Voucher{}, err
 		}
-		var v hotspotVoucher
+		var v Voucher
 		err = db.QueryRow(`
 			INSERT INTO hotspot_vouchers (code, batch_id, amount_bytes, note)
 			VALUES ($1, $2, $3, NULLIF($4, ''))
@@ -59,7 +59,7 @@ func insertVoucherWithRetry(db *sql.DB, batchID string, amountBytes int64, note 
 			lastErr = err
 			continue
 		}
-		return hotspotVoucher{}, err
+		return Voucher{}, err
 	}
-	return hotspotVoucher{}, fmt.Errorf("falha ao gerar codigo de voucher unico: %w", lastErr)
+	return Voucher{}, fmt.Errorf("falha ao gerar codigo de voucher unico: %w", lastErr)
 }

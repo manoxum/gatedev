@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -47,8 +48,8 @@ func liveHotspotClientIP(ctx context.Context, worker *workerapi.Client, iface, m
 // Postgres ate o tc no worker sem normalizar pra uma unidade comum -
 // Value nil = sem limite (Unit e ignorada nesse caso).
 type rateLimit struct {
-	Value *float64 `json:"value"`
-	Unit  rateUnit `json:"unit"`
+	Value *float64       `json:"value"`
+	Unit  store.RateUnit `json:"unit"`
 }
 
 // effectiveDeviceRates decide a taxa que deve valer agora para um
@@ -58,7 +59,7 @@ type rateLimit struct {
 // de dispositivo/perfil nunca throttla: estourar um periodo
 // configurado e bloqueio rigido (ver reconcileDeviceQuota em
 // hotspot_device_quota_store.go), nao reducao de taxa.
-func effectiveDeviceRates(limits hotspotLimits) (download, upload rateLimit) {
+func effectiveDeviceRates(limits store.Limits) (download, upload rateLimit) {
 	return rateLimit{limits.DownloadRateValue, limits.DownloadRateUnit},
 		rateLimit{limits.UploadRateValue, limits.UploadRateUnit}
 }
@@ -68,14 +69,14 @@ type shapingGlobalPayload struct {
 }
 
 type shapingDevicePayload struct {
-	Interface         string   `json:"interface"`
-	MAC               string   `json:"mac"`
-	IP                string   `json:"ip"`
-	Fwmark            int      `json:"fwmark"`
-	DownloadRateValue *float64 `json:"downloadRateValue"`
-	DownloadRateUnit  rateUnit `json:"downloadRateUnit"`
-	UploadRateValue   *float64 `json:"uploadRateValue"`
-	UploadRateUnit    rateUnit `json:"uploadRateUnit"`
+	Interface         string         `json:"interface"`
+	MAC               string         `json:"mac"`
+	IP                string         `json:"ip"`
+	Fwmark            int            `json:"fwmark"`
+	DownloadRateValue *float64       `json:"downloadRateValue"`
+	DownloadRateUnit  store.RateUnit `json:"downloadRateUnit"`
+	UploadRateValue   *float64       `json:"uploadRateValue"`
+	UploadRateUnit    store.RateUnit `json:"uploadRateUnit"`
 }
 
 // applyGlobalShaping garante so a contagem agregada de todo o hotspot
@@ -98,7 +99,7 @@ func applyGlobalShaping(ctx context.Context, worker *workerapi.Client, iface str
 // reconciliacao (reenviar o IP atual resolve renovacao de DHCP sem o
 // worker guardar estado).
 func ensureDeviceShaping(ctx context.Context, db *sql.DB, worker *workerapi.Client, iface, mac, ip string) error {
-	fwmark, err := getOrCreateDeviceFwmark(db, mac)
+	fwmark, err := store.GetOrCreateDeviceFwmark(db, mac)
 	if err != nil {
 		return err
 	}
@@ -124,7 +125,7 @@ func ensureDeviceShaping(ctx context.Context, db *sql.DB, worker *workerapi.Clie
 // agora (senao nao ha IP pra aplicar; o loop de reconciliacao cuida
 // quando ele aparecer).
 func applyDeviceShapingLive(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac string) {
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] limite do dispositivo %s persistido, mas nao foi possivel ler WIFI_INTERFACE: %v", mac, err)
 		return

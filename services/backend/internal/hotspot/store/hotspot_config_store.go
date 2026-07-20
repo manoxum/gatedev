@@ -1,4 +1,4 @@
-package hotspot
+package store
 
 import (
 	"context"
@@ -52,7 +52,7 @@ var requiredHotspotRuntimeKeys = []string{
 // MissingHotspotRuntimeKey devolve o nome da primeira chave obrigatoria
 // ausente num config ja resolvido (com defaults aplicados, ver
 // GetHotspotConfig), ou "" se completo. Compartilhada por
-// hotspotRuntimeConfig (usada antes de start/apply) e hotspotConfigPresent
+// HotspotRuntimeConfig (usada antes de start/apply) e hotspotConfigPresent
 // (services/backend/setup.go, tela de configuracao inicial) para as duas
 // nunca divergirem sobre o que conta como "hotspot configurado".
 func MissingHotspotRuntimeKey(config map[string]string) string {
@@ -100,7 +100,7 @@ func GetHotspotConfig(ctx context.Context, db *sql.DB) (map[string]string, error
 	return config, rows.Err()
 }
 
-func saveHotspotConfig(ctx context.Context, db *sql.DB, values map[string]string) error {
+func SaveHotspotConfig(ctx context.Context, db *sql.DB, values map[string]string) error {
 	allowed := hotspotConfigAllowedSet()
 	clean := make(map[string]string, len(values))
 	for key, value := range values {
@@ -140,7 +140,7 @@ func saveHotspotConfig(ctx context.Context, db *sql.DB, values map[string]string
 	return tx.Commit()
 }
 
-func hotspotRuntimeConfig(ctx context.Context, db *sql.DB) (map[string]string, error) {
+func HotspotRuntimeConfig(ctx context.Context, db *sql.DB) (map[string]string, error) {
 	config, err := GetHotspotConfig(ctx, db)
 	if err != nil {
 		return nil, err

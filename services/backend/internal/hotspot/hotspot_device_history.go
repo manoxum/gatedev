@@ -1,12 +1,13 @@
 // hotspot_device_history.go expoe a listagem de dispositivos que ja se
 // conectaram ao hotspot alguma vez (diferente da lista de "conectados
 // agora" em hotspot_devices.go e da de "bloqueados" em
-// hotspot_blocklist.go) - alimentada por recordDeviceSeen a cada vez
+// hotspot_blocklist.go) - alimentada por store.RecordDeviceSeen a cada vez
 // que um MAC aparece nos clientes ao vivo.
 package hotspot
 
 import (
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"database/sql"
 	"encoding/json"
@@ -14,32 +15,22 @@ import (
 	"time"
 )
 
-type hotspotKnownDevice struct {
-	MACAddress  string
-	Vendor      sql.NullString
-	DeviceName  sql.NullString
-	OSName      sql.NullString
-	Alias       sql.NullString
-	FirstSeenAt sql.NullTime
-	LastSeenAt  sql.NullTime
-}
-
 type hotspotKnownDeviceResponse struct {
-	MAC         string      `json:"mac"`
-	Vendor      string      `json:"vendor,omitempty"`
-	DeviceName  string      `json:"deviceName,omitempty"`
-	OSName      string      `json:"osName,omitempty"`
-	Alias       string      `json:"alias,omitempty"`
-	FirstSeenAt string      `json:"firstSeenAt,omitempty"`
-	LastSeenAt  string      `json:"lastSeenAt,omitempty"`
-	Connected   bool        `json:"connected"`
-	Blocked     bool        `json:"blocked"`
-	BlockReason blockReason `json:"blockReason,omitempty"`
+	MAC         string            `json:"mac"`
+	Vendor      string            `json:"vendor,omitempty"`
+	DeviceName  string            `json:"deviceName,omitempty"`
+	OSName      string            `json:"osName,omitempty"`
+	Alias       string            `json:"alias,omitempty"`
+	FirstSeenAt string            `json:"firstSeenAt,omitempty"`
+	LastSeenAt  string            `json:"lastSeenAt,omitempty"`
+	Connected   bool              `json:"connected"`
+	Blocked     bool              `json:"blocked"`
+	BlockReason store.BlockReason `json:"blockReason,omitempty"`
 }
 
 func RegisterHotspotDeviceHistoryRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sql.DB, worker *workerapi.Client) {
 	mux.HandleFunc("GET /api/hotspot/devices/known", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		devices, err := listKnownHotspotDevices(db)
+		devices, err := store.ListKnownHotspotDevices(db)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -58,7 +49,7 @@ func RegisterHotspotDeviceHistoryRoutes(mux *http.ServeMux, admin *auth.Administ
 		// listEnrichedHotspotClients (hotspot_devices.go) - sem isso, um
 		// dispositivo bloqueado por credito/cota mas desconectado no
 		// momento aparecia como "so desconectado" pro frontend, ja que
-		// blockReason so vinha resolvido em /api/hotspot/clients (que so
+		// store.BlockReason so vinha resolvido em /api/hotspot/clients (que so
 		// lista quem esta conectado agora).
 		blocked, err := hotspotBlockedSet(db)
 		if err != nil {
@@ -70,7 +61,7 @@ func RegisterHotspotDeviceHistoryRoutes(mux *http.ServeMux, admin *auth.Administ
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		blockedByQuota, err := hotspotQuotaBlockedSet(db)
+		blockedByQuota, err := store.HotspotQuotaBlockedSet(db)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -78,7 +69,7 @@ func RegisterHotspotDeviceHistoryRoutes(mux *http.ServeMux, admin *auth.Administ
 
 		response := make([]hotspotKnownDeviceResponse, 0, len(devices))
 		for _, device := range devices {
-			reason := deviceBlockReason(device.MACAddress, blocked, blockedByCredit, blockedByQuota)
+			reason := store.DeviceBlockReason(device.MACAddress, blocked, blockedByCredit, blockedByQuota)
 			response = append(response, knownDeviceResponse(device, connected[device.MACAddress], reason))
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -86,11 +77,11 @@ func RegisterHotspotDeviceHistoryRoutes(mux *http.ServeMux, admin *auth.Administ
 	}))
 }
 
-func knownDeviceResponse(device hotspotKnownDevice, connected bool, reason blockReason) hotspotKnownDeviceResponse {
+func knownDeviceResponse(device store.KnownDevice, connected bool, reason store.BlockReason) hotspotKnownDeviceResponse {
 	response := hotspotKnownDeviceResponse{
 		MAC:         device.MACAddress,
 		Connected:   connected,
-		Blocked:     reason != blockReasonNone,
+		Blocked:     reason != store.BlockReasonNone,
 		BlockReason: reason,
 	}
 	if device.Vendor.Valid {

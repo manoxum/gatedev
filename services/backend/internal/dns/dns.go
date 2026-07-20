@@ -3,7 +3,7 @@ package dns
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
-	"bindnet/backend/internal/hotspot"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/platform/config"
 	"bindnet/backend/internal/workerapi"
 	"context"
@@ -103,7 +103,7 @@ func RegisterDNSRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *auth
 	}))
 
 	mux.HandleFunc("POST /api/dns/apply", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		hotspotConfig, err := hotspot.GetHotspotConfig(r.Context(), db)
+		hotspotConfig, err := store.GetHotspotConfig(r.Context(), db)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -135,7 +135,7 @@ func RegisterDNSRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *auth
 			http.Error(w, "campo 'hostname' obrigatorio", http.StatusBadRequest)
 			return
 		}
-		hotspotConfig, err := hotspot.GetHotspotConfig(r.Context(), db)
+		hotspotConfig, err := store.GetHotspotConfig(r.Context(), db)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

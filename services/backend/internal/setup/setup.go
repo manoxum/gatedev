@@ -7,7 +7,7 @@ package setup
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
-	"bindnet/backend/internal/hotspot"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/platform/config"
 	"context"
 	"database/sql"
@@ -52,11 +52,11 @@ func RegisterSetupRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sql.
 }
 
 func hotspotConfigPresent(ctx context.Context, db *sql.DB) (bool, error) {
-	config, err := hotspot.GetHotspotConfig(ctx, db)
+	config, err := store.GetHotspotConfig(ctx, db)
 	if err != nil {
 		return false, err
 	}
-	return hotspot.MissingHotspotRuntimeKey(config) == "", nil
+	return store.MissingHotspotRuntimeKey(config) == "", nil
 }
 
 func pingPostgres(ctx context.Context, db *sql.DB) setupServiceStatus {

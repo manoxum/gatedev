@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -43,7 +44,7 @@ func redeemVoucher(ctx context.Context, db *sql.DB, worker *workerapi.Client, co
 		INSERT INTO hotspot_device_limits (mac_address, limit_type)
 		VALUES ($1, $2)
 		ON CONFLICT (mac_address) DO UPDATE SET limit_type = EXCLUDED.limit_type, updated_at = CURRENT_TIMESTAMP
-	`, mac, limitTypeCredit); err != nil {
+	`, mac, store.LimitTypeCredit); err != nil {
 		return hotspotDeviceCredit{}, err
 	}
 

@@ -12,6 +12,7 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/audit"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -28,7 +29,7 @@ type hotspotPortalMeResponse struct {
 	Alias           string                             `json:"alias,omitempty"`
 	ProfileName     string                             `json:"profileName,omitempty"`
 	Blocked         bool                               `json:"blocked"`
-	LimitType       limitType                          `json:"limitType"`
+	LimitType       store.LimitType                    `json:"limitType"`
 	BlockedByCredit bool                               `json:"blockedByCredit"`
 	BalanceBytes    int64                              `json:"balanceBytes"`
 	PlafondBytes    *int64                             `json:"plafondBytes"`
@@ -79,7 +80,7 @@ func RegisterHotspotPortalRoutes(mux *http.ServeMux, db *sql.DB, worker *workera
 		w.Header().Set("Content-Type", "application/json")
 		// redeemVoucher ja forca o dispositivo para o tipo credito (ver
 		// hotspot_vouchers.go) - sem necessidade de reler effectiveDeviceLimits.
-		_ = json.NewEncoder(w).Encode(creditResponse(credit, limitTypeCredit))
+		_ = json.NewEncoder(w).Encode(creditResponse(credit, store.LimitTypeCredit))
 	})
 
 	mux.HandleFunc("GET /api/hotspot/portal/credit/history", func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +108,7 @@ func portalMeResponse(ctx context.Context, db *sql.DB, worker *workerapi.Client,
 	if err != nil {
 		return hotspotPortalMeResponse{}, err
 	}
-	info, _, err := hotspotDeviceInfoByMAC(db, mac)
+	info, _, err := store.HotspotDeviceInfoByMAC(db, mac)
 	if err != nil {
 		return hotspotPortalMeResponse{}, err
 	}
@@ -119,12 +120,12 @@ func portalMeResponse(ctx context.Context, db *sql.DB, worker *workerapi.Client,
 	if err != nil {
 		return hotspotPortalMeResponse{}, err
 	}
-	profile, _, err := getProfile(db, profileID)
+	profile, _, err := store.GetProfile(db, profileID)
 	if err != nil {
 		return hotspotPortalMeResponse{}, err
 	}
 	var quotaPeriods []hotspotDeviceQuotaPeriodResponse
-	if limits.LimitType == limitTypeQuota {
+	if limits.LimitType == store.LimitTypeQuota {
 		quotaPeriods, err = listDeviceQuotaPeriods(db, mac, limits)
 		if err != nil {
 			return hotspotPortalMeResponse{}, err

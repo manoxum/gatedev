@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -20,16 +21,16 @@ import (
 // sessao (GET .../sessions/{id}/consumption, ver hotspot_sessions.go);
 // fora do tipo credito so o trace acontece, o saldo nunca e debitado
 // (nao ha "conta" pra descontar).
-func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerapi.Client, creditTrace *creditTraceClient, mac, ip string, effectiveType limitType, totalBytes int64) error {
+func reconcileDeviceCredit(ctx context.Context, db *sql.DB, worker *workerapi.Client, creditTrace *store.CreditTraceClient, mac, ip string, effectiveType store.LimitType, totalBytes int64) error {
 	credit, err := syncDeviceCreditFromProfile(ctx, db, worker, mac)
 	if err != nil {
 		return err
 	}
-	if effectiveType != limitTypeCredit {
+	if effectiveType != store.LimitTypeCredit {
 		if totalBytes == 0 {
 			return nil
 		}
-		return creditTrace.recordDebit(ctx, mac, -totalBytes, credit.BalanceBytes)
+		return creditTrace.RecordDebit(ctx, mac, -totalBytes, credit.BalanceBytes)
 	}
 	if credit.BlockedByCredit {
 		applyLiveTrafficBlock(ctx, db, worker, mac, ip, true)

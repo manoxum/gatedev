@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -19,7 +20,7 @@ import (
 // media do intervalo inteiro. Roda para sempre (goroutine de fundo,
 // iniciada em main.go); erros por dispositivo so logam e nao abortam o
 // ciclo inteiro.
-func StartHotspotUsageSamplingLoop(db *sql.DB, worker *workerapi.Client, creditTrace *creditTraceClient, speedHistory *deviceSpeedHistoryStore, interval time.Duration) {
+func StartHotspotUsageSamplingLoop(db *sql.DB, worker *workerapi.Client, creditTrace *store.CreditTraceClient, speedHistory *deviceSpeedHistoryStore, interval time.Duration) {
 	ctx := context.Background()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -28,7 +29,7 @@ func StartHotspotUsageSamplingLoop(db *sql.DB, worker *workerapi.Client, creditT
 	}
 }
 
-func sampleHotspotUsageOnce(ctx context.Context, db *sql.DB, worker *workerapi.Client, creditTrace *creditTraceClient, speedHistory *deviceSpeedHistoryStore) {
+func sampleHotspotUsageOnce(ctx context.Context, db *sql.DB, worker *workerapi.Client, creditTrace *store.CreditTraceClient, speedHistory *deviceSpeedHistoryStore) {
 	var status struct {
 		Running bool `json:"running"`
 	}
@@ -44,7 +45,7 @@ func sampleHotspotUsageOnce(ctx context.Context, db *sql.DB, worker *workerapi.C
 		log.Printf("[backend] amostragem de trafego global falhou: %v", err)
 	}
 
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		return
 	}
@@ -61,7 +62,7 @@ func sampleHotspotUsageOnce(ctx context.Context, db *sql.DB, worker *workerapi.C
 }
 
 // reconcileGlobalUsage e o equivalente global de reconcileDeviceUsage -
-// grava o delta acumulado (recordGlobalUsage, tambem usado por
+// grava o delta acumulado (store.RecordGlobalUsage, tambem usado por
 // globalQuotaExceeded via hotspot_global_traffic) e a amostra de
 // velocidade geral (sob a chave sentinela globalSpeedHistoryKey no
 // mesmo deviceSpeedHistoryStore usado por dispositivo). Roda so aqui, a
@@ -74,7 +75,7 @@ func reconcileGlobalUsage(db *sql.DB, worker *workerapi.Client, speedHistory *de
 	if err != nil {
 		return err
 	}
-	deltaDown, deltaUp, err := recordGlobalUsage(db, download, upload)
+	deltaDown, deltaUp, err := store.RecordGlobalUsage(db, download, upload)
 	if err != nil {
 		return err
 	}
@@ -88,12 +89,12 @@ func reconcileGlobalUsage(db *sql.DB, worker *workerapi.Client, speedHistory *de
 // (hotspot_reconcile.go), que cuida so de shaping/bloqueio no ciclo de
 // 15s. Reaplicar shaping aqui tambem seria redundante (ensureDeviceShaping
 // ja roda no ciclo de 15s) e caro demais pra rodar a cada segundo.
-func reconcileDeviceUsage(ctx context.Context, db *sql.DB, worker *workerapi.Client, creditTrace *creditTraceClient, speedHistory *deviceSpeedHistoryStore, mac, ip string) error {
+func reconcileDeviceUsage(ctx context.Context, db *sql.DB, worker *workerapi.Client, creditTrace *store.CreditTraceClient, speedHistory *deviceSpeedHistoryStore, mac, ip string) error {
 	download, upload, err := readDeviceShapingStats(ctx, worker, mac)
 	if err != nil {
 		return err
 	}
-	deltaDown, deltaUp, err := recordDeviceUsage(db, mac, download, upload)
+	deltaDown, deltaUp, err := store.RecordDeviceUsage(db, mac, download, upload)
 	if err != nil {
 		return err
 	}
@@ -113,7 +114,7 @@ func reconcileDeviceUsage(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 		return err
 	}
 
-	if limits.LimitType == limitTypeQuota {
+	if limits.LimitType == store.LimitTypeQuota {
 		if err := reconcileDeviceQuota(ctx, db, worker, mac, ip, limits, deltaDown, deltaUp); err != nil {
 			return err
 		}

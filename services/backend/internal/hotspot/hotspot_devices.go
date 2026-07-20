@@ -2,6 +2,7 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"database/sql"
 	"encoding/json"
@@ -19,28 +20,19 @@ type workerHotspotClient struct {
 }
 
 type hotspotClientResponse struct {
-	MAC         string      `json:"mac"`
-	IP          string      `json:"ip"`
-	Hostname    string      `json:"hostname"`
-	Vendor      string      `json:"vendor,omitempty"`
-	DeviceName  string      `json:"deviceName,omitempty"`
-	OSName      string      `json:"osName,omitempty"`
-	Confidence  int         `json:"confidence,omitempty"`
-	Alias       string      `json:"alias,omitempty"`
-	Blocked     bool        `json:"blocked"`
-	BlockReason blockReason `json:"blockReason,omitempty"`
-	ProfileID   string      `json:"profileId,omitempty"`
-	ProfileName string      `json:"profileName,omitempty"`
-	SignalDBM   *int        `json:"signalDbm,omitempty"`
-}
-
-type hotspotDeviceInfo struct {
-	MACAddress string
-	Vendor     sql.NullString
-	DeviceName sql.NullString
-	OSName     sql.NullString
-	Confidence sql.NullInt64
-	Alias      sql.NullString
+	MAC         string            `json:"mac"`
+	IP          string            `json:"ip"`
+	Hostname    string            `json:"hostname"`
+	Vendor      string            `json:"vendor,omitempty"`
+	DeviceName  string            `json:"deviceName,omitempty"`
+	OSName      string            `json:"osName,omitempty"`
+	Confidence  int               `json:"confidence,omitempty"`
+	Alias       string            `json:"alias,omitempty"`
+	Blocked     bool              `json:"blocked"`
+	BlockReason store.BlockReason `json:"blockReason,omitempty"`
+	ProfileID   string            `json:"profileId,omitempty"`
+	ProfileName string            `json:"profileName,omitempty"`
+	SignalDBM   *int              `json:"signalDbm,omitempty"`
 }
 
 type hotspotFingerprintResponse struct {
@@ -62,7 +54,7 @@ func RegisterHotspotDeviceRoutes(mux *http.ServeMux, admin *auth.Administrator, 
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, blockReasonNone))
+		_ = json.NewEncoder(w).Encode(infoToClientFields(mac, info, store.BlockReasonNone))
 	}))
 
 	RegisterHotspotDeviceIdentityRoute(mux, admin, db)
@@ -78,7 +70,7 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerapi.C
 		return nil, err
 	}
 
-	info, err := hotspotDeviceInfoMap(db)
+	info, err := store.HotspotDeviceInfoMap(db)
 	if err != nil {
 		return nil, err
 	}
@@ -90,11 +82,11 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerapi.C
 	if err != nil {
 		return nil, err
 	}
-	blockedByQuota, err := hotspotQuotaBlockedSet(db)
+	blockedByQuota, err := store.HotspotQuotaBlockedSet(db)
 	if err != nil {
 		return nil, err
 	}
-	profiles, err := hotspotDeviceProfileRefs(db)
+	profiles, err := store.HotspotDeviceProfileRefs(db)
 	if err != nil {
 		return nil, err
 	}
@@ -105,10 +97,10 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerapi.C
 		if err != nil {
 			mac = strings.ToLower(strings.TrimSpace(client.MAC))
 		}
-		if err := recordDeviceSeen(db, mac); err != nil {
+		if err := store.RecordDeviceSeen(db, mac); err != nil {
 			log.Printf("[backend] falha ao registrar %s como visto: %v", mac, err)
 		}
-		enriched := infoToClientFields(mac, info[mac], deviceBlockReason(mac, blocked, blockedByCredit, blockedByQuota))
+		enriched := infoToClientFields(mac, info[mac], store.DeviceBlockReason(mac, blocked, blockedByCredit, blockedByQuota))
 		enriched.IP = client.IP
 		enriched.Hostname = client.Hostname
 		enriched.SignalDBM = client.SignalDBM
@@ -121,8 +113,8 @@ func listEnrichedHotspotClients(r *http.Request, db *sql.DB, worker *workerapi.C
 	return clients, nil
 }
 
-func infoToClientFields(mac string, info hotspotDeviceInfo, reason blockReason) hotspotClientResponse {
-	client := hotspotClientResponse{MAC: mac, Blocked: reason != blockReasonNone, BlockReason: reason}
+func infoToClientFields(mac string, info store.DeviceInfo, reason store.BlockReason) hotspotClientResponse {
+	client := hotspotClientResponse{MAC: mac, Blocked: reason != store.BlockReasonNone, BlockReason: reason}
 	if info.Vendor.Valid {
 		client.Vendor = info.Vendor.String
 	}

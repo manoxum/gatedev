@@ -7,6 +7,7 @@ package hotspot
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -46,7 +47,7 @@ var voucherAmountUnits = map[string]bool{
 
 type hotspotVoucherIssueResponse struct {
 	Batch    hotspotVoucherBatch `json:"batch"`
-	Vouchers []hotspotVoucher    `json:"vouchers"`
+	Vouchers []store.Voucher     `json:"vouchers"`
 }
 
 func RegisterHotspotVoucherBatchRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sql.DB, audit *audit.Client) {
@@ -158,8 +159,8 @@ func getVoucherBatch(db *sql.DB, id string) (hotspotVoucherBatch, error) {
 // vouchers vinculados a ele - agrupamento que permite listar e
 // imprimir a emissao inteira de uma vez (ver HotspotVouchersCard e
 // HotspotVoucherBatchDetail no frontend).
-func insertVoucherBatch(db *sql.DB, quantity int, amountBytes int64, amountUnit, note string) (hotspotVoucherBatch, []hotspotVoucher, error) {
-	batchID, err := generateVoucherBatchID()
+func insertVoucherBatch(db *sql.DB, quantity int, amountBytes int64, amountUnit, note string) (hotspotVoucherBatch, []store.Voucher, error) {
+	batchID, err := store.GenerateVoucherBatchID()
 	if err != nil {
 		return hotspotVoucherBatch{}, nil, err
 	}
@@ -175,9 +176,9 @@ func insertVoucherBatch(db *sql.DB, quantity int, amountBytes int64, amountUnit,
 	}
 	batch.ActiveCount = quantity
 
-	vouchers := make([]hotspotVoucher, 0, quantity)
+	vouchers := make([]store.Voucher, 0, quantity)
 	for i := 0; i < quantity; i++ {
-		voucher, err := insertVoucherWithRetry(db, batchID, amountBytes, note)
+		voucher, err := store.InsertVoucherWithRetry(db, batchID, amountBytes, note)
 		if err != nil {
 			return hotspotVoucherBatch{}, nil, err
 		}

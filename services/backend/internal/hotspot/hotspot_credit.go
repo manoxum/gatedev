@@ -3,6 +3,7 @@ package hotspot
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -126,9 +127,9 @@ func RegisterHotspotCreditRoutes(mux *http.ServeMux, admin *auth.Administrator, 
 // sempre derivado do LimitType efetivo do dispositivo (nunca da coluna
 // "enabled" gravada em hotspot_device_credit, que ficou vestigial - ver
 // hotspot_device_limits.go e syncDeviceCreditFromProfile).
-func creditResponse(credit hotspotDeviceCredit, effectiveType limitType) hotspotCreditResponse {
+func creditResponse(credit hotspotDeviceCredit, effectiveType store.LimitType) hotspotCreditResponse {
 	response := hotspotCreditResponse{
-		Enabled:             effectiveType == limitTypeCredit,
+		Enabled:             effectiveType == store.LimitTypeCredit,
 		BalanceBytes:        credit.BalanceBytes,
 		RechargeAmountBytes: credit.RechargeAmountBytes,
 		RechargePeriod:      credit.RechargePeriod,
@@ -160,7 +161,7 @@ func ensureDeviceCreditRow(db *sql.DB, mac string) (hotspotDeviceCredit, error) 
 // hotspot_reconcile.go, so quando o dispositivo tem credito habilitado.
 // O trace do debito vai para o Mongo (creditTrace, alto volume, com
 // TTL - ver hotspot_credit_trace.go) em vez do Postgres.
-func debitDeviceCredit(ctx context.Context, db *sql.DB, creditTrace *creditTraceClient, mac string, totalBytes int64) (newBalance int64, err error) {
+func debitDeviceCredit(ctx context.Context, db *sql.DB, creditTrace *store.CreditTraceClient, mac string, totalBytes int64) (newBalance int64, err error) {
 	err = db.QueryRow(`
 		UPDATE hotspot_device_credit
 		SET balance_bytes = balance_bytes - $2, updated_at = CURRENT_TIMESTAMP
@@ -170,7 +171,7 @@ func debitDeviceCredit(ctx context.Context, db *sql.DB, creditTrace *creditTrace
 	if err != nil {
 		return 0, err
 	}
-	if err := creditTrace.recordDebit(ctx, mac, -totalBytes, newBalance); err != nil {
+	if err := creditTrace.RecordDebit(ctx, mac, -totalBytes, newBalance); err != nil {
 		return 0, err
 	}
 	return newBalance, nil

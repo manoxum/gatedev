@@ -6,7 +6,7 @@
 // Postgres. Recarga manual/automatica e resgate de voucher continuam
 // no Postgres (hotspot_credit_history.go) - sao eventos raros, ligados
 // a acao humana ou dinheiro, sem motivo pra expirar sozinhos.
-package hotspot
+package store
 
 import (
 	"bindnet/backend/internal/platform/config"
@@ -19,7 +19,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-type creditTraceClient struct {
+type CreditTraceClient struct {
 	collection *mongo.Collection
 }
 
@@ -42,12 +42,12 @@ const creditTraceTTLIndexName = "createdAt_ttl"
 // (mongoClient, ver audit.go) numa colecao separada - credito nao e
 // trilha de auditoria do painel, e dado de negocio, mas nao vale abrir
 // uma segunda conexao so por isso.
-func OpenCreditTrace(ctx context.Context, mongoClient *mongo.Client) (*creditTraceClient, error) {
+func OpenCreditTrace(ctx context.Context, mongoClient *mongo.Client) (*CreditTraceClient, error) {
 	collection := mongoClient.Database(config.Getenv("MONGO_DB", "bindnet")).Collection("hotspot_credit_debits")
 	if err := ensureCreditTraceTTLIndex(ctx, collection); err != nil {
 		return nil, err
 	}
-	return &creditTraceClient{collection: collection}, nil
+	return &CreditTraceClient{collection: collection}, nil
 }
 
 func creditTraceRetentionSeconds() int32 {
@@ -82,22 +82,22 @@ func ensureCreditTraceTTLIndex(ctx context.Context, collection *mongo.Collection
 	return collection.Database().RunCommand(ctx, command).Err()
 }
 
-// recordDebit grava uma linha do trace de debito - chamada logo apos
+// RecordDebit grava uma linha do trace de debito - chamada logo apos
 // cada UPDATE de balance_bytes por consumo de trafego (ver
 // debitDeviceCredit em hotspot_credit.go).
-func (c *creditTraceClient) recordDebit(ctx context.Context, mac string, amountBytes, balanceAfterBytes int64) error {
+func (c *CreditTraceClient) RecordDebit(ctx context.Context, mac string, amountBytes, balanceAfterBytes int64) error {
 	_, err := c.collection.InsertOne(ctx, creditDebitEntry{
 		MAC: mac, AmountBytes: amountBytes, BalanceAfterBytes: balanceAfterBytes, CreatedAt: time.Now(),
 	})
 	return err
 }
 
-// listDebits devolve o trace de debito de um MAC, mais recente
+// ListDebits devolve o trace de debito de um MAC, mais recente
 // primeiro. since/until (opcionais) filtram por janela de tempo -
 // usado pelo detalhe de consumo de uma sessao especifica
 // (GET .../sessions/{id}/consumption); limit <= 0 nao limita - usado
 // pelo extrato de credito completo (GET .../credit/history).
-func (c *creditTraceClient) listDebits(ctx context.Context, mac string, since, until *time.Time, limit int64) ([]creditDebitResponse, error) {
+func (c *CreditTraceClient) ListDebits(ctx context.Context, mac string, since, until *time.Time, limit int64) ([]creditDebitResponse, error) {
 	filter := bson.D{{Key: "mac", Value: mac}}
 	if since != nil || until != nil {
 		createdAtFilter := bson.D{}

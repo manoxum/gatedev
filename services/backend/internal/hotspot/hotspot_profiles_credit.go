@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -66,7 +67,7 @@ func applyCreditPolicy(db *sql.DB, mac string, policy hotspotCreditConfigRequest
 // isso sozinho a cada chamada, entao reaplicar em todo mundo e sempre
 // seguro/correto.
 func applyProfileShapingLive(ctx context.Context, db *sql.DB, worker *workerapi.Client, profileID string) {
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		return
 	}

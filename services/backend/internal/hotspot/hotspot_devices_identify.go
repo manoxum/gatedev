@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -11,35 +12,35 @@ import (
 	"strings"
 )
 
-func identifyHotspotClient(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac, hostname string) (hotspotDeviceInfo, error) {
-	if cached, found, err := hotspotDeviceInfoByMAC(db, mac); err != nil {
-		return hotspotDeviceInfo{}, err
+func identifyHotspotClient(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac, hostname string) (store.DeviceInfo, error) {
+	if cached, found, err := store.HotspotDeviceInfoByMAC(db, mac); err != nil {
+		return store.DeviceInfo{}, err
 	} else if found {
 		return cached, nil
 	}
 
 	var fingerprint hotspotFingerprintResponse
 	if err := worker.Call(ctx, http.MethodGet, "/hotspot/fingerprint?mac="+url.QueryEscape(mac), nil, &fingerprint); err != nil {
-		return hotspotDeviceInfo{}, err
+		return store.DeviceInfo{}, err
 	}
 
 	vendor, vendorErr := lookupMACVendor(ctx, mac)
 	profile := inferHotspotDeviceProfile(vendor, hostname, fingerprint)
-	info := hotspotDeviceInfo{
+	info := store.DeviceInfo{
 		MACAddress: mac,
 		Vendor:     sql.NullString{String: vendor, Valid: vendor != ""},
 		DeviceName: sql.NullString{String: profile.DeviceName, Valid: profile.DeviceName != ""},
 		OSName:     sql.NullString{String: profile.OSName, Valid: profile.OSName != ""},
 		Confidence: sql.NullInt64{Int64: int64(profile.Confidence), Valid: profile.Confidence > 0},
 	}
-	if !hotspotDeviceInfoHasData(info) {
+	if !store.HotspotDeviceInfoHasData(info) {
 		if vendorErr != nil {
-			return hotspotDeviceInfo{}, vendorErr
+			return store.DeviceInfo{}, vendorErr
 		}
-		return hotspotDeviceInfo{}, fmt.Errorf("nao foi possivel identificar o fabricante localmente para %s", mac)
+		return store.DeviceInfo{}, fmt.Errorf("nao foi possivel identificar o fabricante localmente para %s", mac)
 	}
-	if err := upsertHotspotDeviceInfo(db, info); err != nil {
-		return hotspotDeviceInfo{}, err
+	if err := store.UpsertHotspotDeviceInfo(db, info); err != nil {
+		return store.DeviceInfo{}, err
 	}
 	return info, nil
 }

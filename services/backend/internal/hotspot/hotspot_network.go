@@ -3,6 +3,7 @@ package hotspot
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -14,7 +15,7 @@ import (
 // currentHotspotInterface busca WIFI_INTERFACE configurado pelo painel -
 // usada tanto para ligar/desligar o hotspot quanto para listar clientes.
 func currentHotspotInterface(ctx context.Context, db *sql.DB) (string, error) {
-	return hotspotWifiInterface(ctx, db)
+	return store.HotspotWifiInterface(ctx, db)
 }
 
 func stopHotspotService(ctx context.Context, worker *workerapi.Client) error {
@@ -55,7 +56,7 @@ func RegisterHotspotUplinkRoute(mux *http.ServeMux, admin *auth.Administrator, a
 			http.Error(w, "campo 'interface' obrigatorio", http.StatusBadRequest)
 			return
 		}
-		if err := saveHotspotConfig(r.Context(), db, map[string]string{"INTERNET_INTERFACE": req.Interface}); err != nil {
+		if err := store.SaveHotspotConfig(r.Context(), db, map[string]string{"INTERNET_INTERFACE": req.Interface}); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

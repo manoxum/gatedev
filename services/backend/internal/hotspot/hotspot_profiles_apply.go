@@ -1,15 +1,11 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
 )
-
-// defaultProfileID e o id fixo do perfil "Padrao" semeado pela
-// migration 20260707000000_hotspot_profiles - mesmo idioma do literal
-// 'global' ja usado por hotspot_global_traffic.id.
-const defaultProfileID = "00000000-0000-0000-0000-000000000001"
 
 // deviceProfileID devolve o perfil vinculado ao MAC, ou o Padrao se o
 // dispositivo nunca foi visto (sem linha em hotspot_device_info) ou a
@@ -18,19 +14,19 @@ func deviceProfileID(db *sql.DB, mac string) (string, error) {
 	var profileID sql.NullString
 	err := db.QueryRow(`SELECT profile_id FROM hotspot_device_info WHERE mac_address = $1`, mac).Scan(&profileID)
 	if err == sql.ErrNoRows {
-		return defaultProfileID, nil
+		return store.DefaultProfileID, nil
 	}
 	if err != nil {
 		return "", err
 	}
 	if !profileID.Valid {
-		return defaultProfileID, nil
+		return store.DefaultProfileID, nil
 	}
 	return profileID.String, nil
 }
 
 // assignDeviceProfile so toca a coluna profile_id - mesmo idioma de
-// recordDeviceSeen (hotspot_device_info_store.go), nunca sobrescreve
+// store.RecordDeviceSeen (hotspot_device_info_store.go), nunca sobrescreve
 // vendor/device_name/os_name/alias/confidence.
 func assignDeviceProfile(db *sql.DB, mac, profileID string) error {
 	_, err := db.Exec(`
@@ -49,24 +45,24 @@ func assignDeviceProfile(db *sql.DB, mac, profileID string) error {
 // tiver configurado nada. Um override deixado de uma configuracao
 // antiga fica dormente/ignorado se o perfil vinculado deixar de ser
 // "custom".
-func effectiveDeviceLimits(db *sql.DB, mac string) (hotspotLimits, error) {
+func effectiveDeviceLimits(db *sql.DB, mac string) (store.Limits, error) {
 	profileID, err := deviceProfileID(db, mac)
 	if err != nil {
-		return hotspotLimits{}, err
+		return store.Limits{}, err
 	}
-	profileLimits, found, err := getProfileLimits(db, profileID)
+	profileLimits, found, err := store.GetProfileLimits(db, profileID)
 	if err != nil {
-		return hotspotLimits{}, err
+		return store.Limits{}, err
 	}
-	if !found || profileLimits.LimitType != limitTypeCustom {
+	if !found || profileLimits.LimitType != store.LimitTypeCustom {
 		return profileLimits, nil
 	}
-	deviceLimits, found, err := getDeviceLimits(db, mac)
+	deviceLimits, found, err := store.GetDeviceLimits(db, mac)
 	if err != nil {
-		return hotspotLimits{}, err
+		return store.Limits{}, err
 	}
 	if !found {
-		return normalizeDeviceLimitUnits(hotspotLimits{LimitType: limitTypeUnlimited}), nil
+		return store.NormalizeDeviceLimitUnits(store.Limits{LimitType: store.LimitTypeUnlimited}), nil
 	}
 	return deviceLimits, nil
 }
@@ -101,7 +97,7 @@ func syncDeviceCreditFromProfile(ctx context.Context, db *sql.DB, worker *worker
 	if err != nil {
 		return hotspotDeviceCredit{}, err
 	}
-	if effective.LimitType != limitTypeCredit {
+	if effective.LimitType != store.LimitTypeCredit {
 		if credit.BlockedByCredit {
 			if err := unblockCreditIfNeeded(ctx, db, worker, mac, &credit); err != nil {
 				return hotspotDeviceCredit{}, err
@@ -114,11 +110,11 @@ func syncDeviceCreditFromProfile(ctx context.Context, db *sql.DB, worker *worker
 	if err != nil {
 		return hotspotDeviceCredit{}, err
 	}
-	profile, found, err := getProfile(db, profileID)
+	profile, found, err := store.GetProfile(db, profileID)
 	if err != nil {
 		return hotspotDeviceCredit{}, err
 	}
-	if !found || profile.LimitType != limitTypeCredit {
+	if !found || profile.LimitType != store.LimitTypeCredit {
 		// credito efetivo veio do override "custom" do dispositivo, nao
 		// do perfil - nao ha politica de perfil pra sincronizar aqui.
 		return credit, nil

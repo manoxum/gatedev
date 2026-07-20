@@ -1,4 +1,4 @@
-package hotspot
+package store
 
 import (
 	"database/sql"
@@ -12,18 +12,18 @@ type hotspotProfileRef struct {
 	Name string
 }
 
-// hotspotDeviceProfileRefs devolve o perfil (id+nome) efetivamente
+// HotspotDeviceProfileRefs devolve o perfil (id+nome) efetivamente
 // vinculado a cada MAC que ja tem linha em hotspot_device_info -
 // dispositivos sem linha ainda (nunca vistos) nao aparecem aqui;
 // listEnrichedHotspotClients trata a ausencia como perfil Padrao. O
 // join sempre resolve para algum perfil (no minimo o Padrao, protegido
 // de remocao) mesmo que profile_id esteja NULL numa linha antiga.
-func hotspotDeviceProfileRefs(db *sql.DB) (map[string]hotspotProfileRef, error) {
+func HotspotDeviceProfileRefs(db *sql.DB) (map[string]hotspotProfileRef, error) {
 	rows, err := db.Query(`
 		SELECT i.mac_address, p.id, p.name
 		FROM hotspot_device_info i
 		JOIN hotspot_profiles p ON p.id = COALESCE(i.profile_id, $1)
-	`, defaultProfileID)
+	`, DefaultProfileID)
 	if err != nil {
 		return nil, err
 	}

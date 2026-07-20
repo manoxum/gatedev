@@ -3,6 +3,7 @@ package hotspot
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"database/sql"
 	"encoding/json"
@@ -41,11 +42,11 @@ func RegisterHotspotDeviceQuotaRoutes(mux *http.ServeMux, admin *auth.Administra
 			return
 		}
 		period := r.PathValue("period")
-		if !isValidQuotaPeriodType(period) {
+		if !store.IsValidQuotaPeriodType(period) {
 			http.Error(w, "periodo invalido (use daily, weekly ou monthly)", http.StatusBadRequest)
 			return
 		}
-		if err := resetDeviceQuotaPeriodNow(db, mac, period); err != nil {
+		if err := store.ResetDeviceQuotaPeriodNow(db, mac, period); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

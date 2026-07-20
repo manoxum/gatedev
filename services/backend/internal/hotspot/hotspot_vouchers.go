@@ -9,13 +9,13 @@ package hotspot
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // errHotspotVoucherInvalid cobre tanto "codigo nao existe" quanto "ja
@@ -25,17 +25,6 @@ import (
 var errHotspotVoucherInvalid = errors.New("codigo de voucher invalido ou ja utilizado")
 
 const maxVoucherBatchSize = 100
-
-type hotspotVoucher struct {
-	Code          string     `json:"code"`
-	BatchID       string     `json:"batchId,omitempty"`
-	AmountBytes   int64      `json:"amountBytes"`
-	Status        string     `json:"status"`
-	Note          string     `json:"note,omitempty"`
-	RedeemedByMAC string     `json:"redeemedByMac,omitempty"`
-	RedeemedAt    *time.Time `json:"redeemedAt,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-}
 
 func RegisterHotspotVoucherRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sql.DB, audit *audit.Client) {
 	RegisterHotspotVoucherBatchRoutes(mux, admin, db, audit)
@@ -67,7 +56,7 @@ func RegisterHotspotVoucherRoutes(mux *http.ServeMux, admin *auth.Administrator,
 	}))
 }
 
-func listVouchers(db *sql.DB, status, batchID string) ([]hotspotVoucher, error) {
+func listVouchers(db *sql.DB, status, batchID string) ([]store.Voucher, error) {
 	query := `
 		SELECT code, COALESCE(batch_id, ''), amount_bytes, status, COALESCE(note, ''), COALESCE(redeemed_by_mac, ''), redeemed_at, created_at
 		FROM hotspot_vouchers
@@ -93,9 +82,9 @@ func listVouchers(db *sql.DB, status, batchID string) ([]hotspotVoucher, error) 
 	}
 	defer rows.Close()
 
-	vouchers := []hotspotVoucher{}
+	vouchers := []store.Voucher{}
 	for rows.Next() {
-		var v hotspotVoucher
+		var v store.Voucher
 		var redeemedAt sql.NullTime
 		if err := rows.Scan(&v.Code, &v.BatchID, &v.AmountBytes, &v.Status, &v.Note, &v.RedeemedByMAC, &redeemedAt, &v.CreatedAt); err != nil {
 			return nil, err

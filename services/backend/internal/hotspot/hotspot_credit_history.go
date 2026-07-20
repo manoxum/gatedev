@@ -32,7 +32,7 @@ type hotspotCreditHistoryResponse struct {
 // recordCreditHistory grava uma linha do extrato no Postgres - chamada
 // logo apos cada UPDATE de balance_bytes por recarga manual, recarga
 // automatica ou resgate de voucher (nunca por debito de trafego, ver
-// creditTraceClient.recordDebit e listSessionMovements).
+// store.CreditTraceClient.RecordDebit e listSessionMovements).
 func recordCreditHistory(db *sql.DB, mac, entryType string, amountBytes, balanceAfterBytes int64) error {
 	_, err := db.Exec(`
 		INSERT INTO hotspot_device_credit_history (mac_address, entry_type, amount_bytes, balance_after_bytes)

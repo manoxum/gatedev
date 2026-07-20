@@ -20,7 +20,7 @@ import (
 // hotspot_config mas fora de hotspotConfigKeys - mesmo padrao de
 // hotspotDesiredStateKey (hotspot_config_store.go): nao aparece em
 // GET /api/hotspot/config nem pode ser sobrescrita via PATCH
-// (saveHotspotConfig rejeita chaves fora da allowlist).
+// (store.SaveHotspotConfig rejeita chaves fora da allowlist).
 //
 // Nao da pra truncar de verdade o log nativo do Docker (arquivo
 // *-json.log do driver de log, so acessivel no host - o worker nao

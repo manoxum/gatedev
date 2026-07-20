@@ -2,6 +2,7 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -95,7 +96,7 @@ func globalLiveStats(ctx context.Context, worker *workerapi.Client) (hotspotDevi
 // leitura - devolve zero, sem erro, se o dispositivo nao estiver
 // conectado (nada para medir ainda).
 func deviceLiveStats(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac string) (hotspotDeviceStatsResponse, error) {
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		return hotspotDeviceStatsResponse{}, err
 	}
@@ -112,7 +113,7 @@ func deviceLiveStats(ctx context.Context, db *sql.DB, worker *workerapi.Client, 
 // usada pela tela de clientes conectados, que mostra um velocimetro
 // por linha.
 func allClientsLiveStats(ctx context.Context, db *sql.DB, worker *workerapi.Client) ([]hotspotClientStatsEntry, error) {
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		return nil, err
 	}

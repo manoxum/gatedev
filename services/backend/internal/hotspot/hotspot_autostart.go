@@ -2,6 +2,7 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/audit"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -13,7 +14,7 @@ import (
 // AutoStartHotspotOnBoot religa o hotspot sozinho quando o backend
 // sobe (container recriado, ou reboot da maquina), mas so se a ultima
 // intencao do admin (POST /api/hotspot/start ou /stop) foi ligar - ver
-// hotspotDesiredStateRunning em hotspot_config_store.go. Sem isso, o
+// store.HotspotDesiredStateRunning em hotspot_config_store.go. Sem isso, o
 // container do hotspot sobe em modo "manager" e fica ocioso ate
 // alguem clicar em "Iniciar" no painel de novo, mesmo que o hotspot
 // estivesse ligado antes do restart.
@@ -24,7 +25,7 @@ import (
 func AutoStartHotspotOnBoot(db *sql.DB, worker *workerapi.Client, audit *audit.Client) {
 	ctx := context.Background()
 
-	desired, err := hotspotDesiredStateRunning(ctx, db)
+	desired, err := store.HotspotDesiredStateRunning(ctx, db)
 	if err != nil {
 		log.Printf("[backend] autostart do hotspot: falha ao ler estado desejado: %v", err)
 		return

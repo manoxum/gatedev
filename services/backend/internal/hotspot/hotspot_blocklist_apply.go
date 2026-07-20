@@ -5,6 +5,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -45,7 +46,7 @@ func reapplyHotspotBlocklist(ctx context.Context, db *sql.DB, worker *workerapi.
 // dispositivo continua associado. So loga em caso de falha - a
 // blocklist ja foi persistida no Postgres de qualquer forma.
 func applyLiveBlockForMode(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac, mode string, block bool) {
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] blocklist persistida, mas nao foi possivel ler WIFI_INTERFACE: %v", err)
 		return
@@ -87,7 +88,7 @@ func applyLiveBlockRequest(ctx context.Context, worker *workerapi.Client, iface,
 // ip so e necessario para block=true (a regra de download precisa do
 // IP atual); no unblock a remocao e so por comentario, sem IP.
 func applyLiveTrafficBlock(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac, ip string, block bool) {
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] bloqueio de trafego persistido, mas nao foi possivel ler WIFI_INTERFACE: %v", err)
 		return

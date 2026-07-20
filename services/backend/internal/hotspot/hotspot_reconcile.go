@@ -2,6 +2,7 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/audit"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -43,7 +44,7 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 		return
 	}
 
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] reconciliacao: falha ao ler WIFI_INTERFACE: %v", err)
 		return
@@ -80,11 +81,11 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 // que o admin tenha pedido (ex.: watchdog de falha de beacon em
 // services/worker/hotspot/watchdog.sh derrubando o create_ap travado)
 // - so age se a ultima intencao registrada foi ligar
-// (hotspotDesiredStateRunning, a mesma usada por
+// (store.HotspotDesiredStateRunning, a mesma usada por
 // AutoStartHotspotOnBoot), senao um "parar" deliberado pelo painel
 // seria desfeito no proximo ciclo deste loop.
 func recoverHotspotIfDesired(ctx context.Context, db *sql.DB, worker *workerapi.Client, audit *audit.Client) {
-	desired, err := hotspotDesiredStateRunning(ctx, db)
+	desired, err := store.HotspotDesiredStateRunning(ctx, db)
 	if err != nil {
 		log.Printf("[backend] reconciliacao: falha ao ler estado desejado do hotspot: %v", err)
 		return

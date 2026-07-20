@@ -1,4 +1,4 @@
-package hotspot
+package store
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func hotspotWifiInterface(ctx context.Context, db *sql.DB) (string, error) {
+func HotspotWifiInterface(ctx context.Context, db *sql.DB) (string, error) {
 	config, err := GetHotspotConfig(ctx, db)
 	if err != nil {
 		return "", err
@@ -23,7 +23,7 @@ func hotspotWifiInterface(ctx context.Context, db *sql.DB) (string, error) {
 // (ligar/desligar, ver POST /api/hotspot/start e /stop) na mesma
 // tabela hotspot_config, mas fora de hotspotConfigKeys - de proposito,
 // pra nao aparecer em GET /api/hotspot/config nem poder ser
-// sobrescrita via PATCH (saveHotspotConfig rejeita chaves fora da
+// sobrescrita via PATCH (SaveHotspotConfig rejeita chaves fora da
 // allowlist). Usada por AutoStartHotspotOnBoot em
 // hotspot_autostart.go pra decidir se religa o hotspot sozinho quando
 // o backend reinicia, e por recoverHotspotIfDesired em
@@ -31,7 +31,7 @@ func hotspotWifiInterface(ctx context.Context, db *sql.DB) (string, error) {
 // cai sem pedido do admin (ex.: watchdog de falha de beacon).
 const hotspotDesiredStateKey = "_DESIRED_STATE"
 
-func setHotspotDesiredState(ctx context.Context, db *sql.DB, running bool) error {
+func SetHotspotDesiredState(ctx context.Context, db *sql.DB, running bool) error {
 	value := "stopped"
 	if running {
 		value = "running"
@@ -46,7 +46,7 @@ func setHotspotDesiredState(ctx context.Context, db *sql.DB, running bool) error
 	return err
 }
 
-func hotspotDesiredStateRunning(ctx context.Context, db *sql.DB) (bool, error) {
+func HotspotDesiredStateRunning(ctx context.Context, db *sql.DB) (bool, error) {
 	var value string
 	err := db.QueryRowContext(ctx, `SELECT value FROM hotspot_config WHERE key = $1`, hotspotDesiredStateKey).Scan(&value)
 	if err == sql.ErrNoRows {

@@ -1,4 +1,4 @@
-package hotspot
+package store
 
 import (
 	"database/sql"
@@ -29,11 +29,11 @@ type hotspotGlobalTraffic struct {
 	Throttled           bool
 }
 
-// getOrCreateDeviceFwmark garante que o dispositivo tenha uma linha em
+// GetOrCreateDeviceFwmark garante que o dispositivo tenha uma linha em
 // hotspot_device_traffic (criada de forma preguicosa, independente de
 // limite configurado) e devolve o fwmark atribuido pela sequence -
 // nunca hash de MAC, evita colisao.
-func getOrCreateDeviceFwmark(db *sql.DB, mac string) (int, error) {
+func GetOrCreateDeviceFwmark(db *sql.DB, mac string) (int, error) {
 	traffic, err := ensureDeviceTrafficRow(db, mac)
 	if err != nil {
 		return 0, err

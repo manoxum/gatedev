@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -79,7 +80,7 @@ func unblockCreditIfNeeded(ctx context.Context, db *sql.DB, worker *workerapi.Cl
 // loga em falha, ja que o bloqueio de trafego em si (applyLiveTrafficBlock)
 // e a garantia principal e ja foi aplicado separadamente.
 func applyCaptivePortalRedirect(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac string, enable bool) {
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		return
 	}

@@ -4,7 +4,7 @@
 // fecha quando some dela (ver reconcileHotspotOnce em
 // hotspot_reconcile.go). total_bytes e incrementado a cada ciclo de
 // reconciliacao com o trafego real do dispositivo (deltaDown+deltaUp
-// de recordDeviceUsage), independente de ter credito habilitado -
+// de store.RecordDeviceUsage), independente de ter credito habilitado -
 // debitar saldo de credito (so quando habilitado, ver
 // reconcileDeviceCredit) e uma consequencia separada, que tambem grava
 // o trace bruto no Mongo (hotspot_credit_debits, ver
@@ -18,6 +18,7 @@ package hotspot
 
 import (
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -76,7 +77,7 @@ func incrementSessionConsumption(db *sql.DB, mac string, amountBytes int64) erro
 // RegisterHotspotSessionRoutes expoe so o detalhe de consumo de uma
 // sessao (a lista de sessoes em si aparece embutida na conta corrente
 // de credito, ver GET .../credit/history em hotspot_credit_history.go).
-func RegisterHotspotSessionRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sql.DB, creditTrace *creditTraceClient) {
+func RegisterHotspotSessionRoutes(mux *http.ServeMux, admin *auth.Administrator, db *sql.DB, creditTrace *store.CreditTraceClient) {
 	mux.HandleFunc("GET /api/hotspot/devices/{mac}/sessions/{id}/consumption", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
 		mac, err := normalizeHotspotMAC(r.PathValue("mac"))
 		if err != nil {
@@ -101,7 +102,7 @@ func RegisterHotspotSessionRoutes(mux *http.ServeMux, admin *auth.Administrator,
 		if session.EndedAt.Valid {
 			until = &session.EndedAt.Time
 		}
-		entries, err := creditTrace.listDebits(r.Context(), mac, &session.StartedAt, until, 0)
+		entries, err := creditTrace.ListDebits(r.Context(), mac, &session.StartedAt, until, 0)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return

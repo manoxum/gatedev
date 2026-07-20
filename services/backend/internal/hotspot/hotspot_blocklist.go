@@ -91,7 +91,7 @@ func RegisterHotspotBlocklistRoutes(mux *http.ServeMux, admin *auth.Administrato
 
 // hotspotBlockedSet devolve o conjunto de MACs bloqueados manualmente
 // pelo admin, mapeado para o "mode" do bloqueio ("deauth" ou
-// "traffic") - usado por deviceBlockReason para distinguir bloqueio
+// "traffic") - usado por store.DeviceBlockReason para distinguir bloqueio
 // completo (desconectado do Wi-Fi) de corte so de trafego (dispositivo
 // continua associado).
 func hotspotBlockedSet(db *sql.DB) (map[string]string, error) {

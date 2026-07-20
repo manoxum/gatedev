@@ -3,6 +3,7 @@ package hotspot
 import (
 	"bindnet/backend/internal/audit"
 	"bindnet/backend/internal/auth"
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -14,7 +15,7 @@ import (
 
 func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *auth.Administrator, audit *audit.Client, db *sql.DB) {
 	mux.HandleFunc("GET /api/hotspot/config", auth.RequireSession(admin, func(w http.ResponseWriter, r *http.Request) {
-		config, err := GetHotspotConfig(r.Context(), db)
+		config, err := store.GetHotspotConfig(r.Context(), db)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -29,7 +30,7 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 			http.Error(w, "corpo invalido", http.StatusBadRequest)
 			return
 		}
-		if err := saveHotspotConfig(r.Context(), db, config); err != nil {
+		if err := store.SaveHotspotConfig(r.Context(), db, config); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -85,7 +86,7 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 		}
 		reapplyHotspotBlocklist(r.Context(), db, worker, iface)
 		reapplyHotspotShaping(r.Context(), worker, iface)
-		if err := setHotspotDesiredState(r.Context(), db, true); err != nil {
+		if err := store.SetHotspotDesiredState(r.Context(), db, true); err != nil {
 			log.Printf("[backend] falha ao gravar estado desejado do hotspot (ligado): %v", err)
 		}
 		username, _ := auth.SessionUser(r, admin)
@@ -110,7 +111,7 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 				log.Printf("[backend] aviso: falha ao devolver %s ao NetworkManager: %v", iface, err)
 			}
 		}
-		if err := setHotspotDesiredState(r.Context(), db, false); err != nil {
+		if err := store.SetHotspotDesiredState(r.Context(), db, false); err != nil {
 			log.Printf("[backend] falha ao gravar estado desejado do hotspot (parado): %v", err)
 		}
 		username, _ := auth.SessionUser(r, admin)
@@ -183,7 +184,7 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 }
 
 func applyHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerapi.Client) error {
-	config, err := hotspotRuntimeConfig(ctx, db)
+	config, err := store.HotspotRuntimeConfig(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -191,7 +192,7 @@ func applyHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerap
 }
 
 func startHotspotRuntimeConfig(ctx context.Context, db *sql.DB, worker *workerapi.Client) error {
-	config, err := hotspotRuntimeConfig(ctx, db)
+	config, err := store.HotspotRuntimeConfig(ctx, db)
 	if err != nil {
 		return err
 	}

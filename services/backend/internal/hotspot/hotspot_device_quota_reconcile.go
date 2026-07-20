@@ -1,6 +1,7 @@
 package hotspot
 
 import (
+	"bindnet/backend/internal/hotspot/store"
 	"bindnet/backend/internal/workerapi"
 	"context"
 	"database/sql"
@@ -8,22 +9,22 @@ import (
 	"time"
 )
 
-func reconcileDeviceQuota(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac, ip string, limits hotspotLimits, deltaDown, deltaUp int64) error {
+func reconcileDeviceQuota(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac, ip string, limits store.Limits, deltaDown, deltaUp int64) error {
 	anyExceeded := false
-	for _, p := range configuredQuotaPeriods(limits) {
-		if _, err := ensureDeviceQuotaPeriodRow(db, mac, p.Type); err != nil {
+	for _, p := range store.ConfiguredQuotaPeriods(limits) {
+		if _, err := store.EnsureDeviceQuotaPeriodRow(db, mac, p.Type); err != nil {
 			return err
 		}
-		if err := resetDeviceQuotaPeriodIfExpired(db, mac, p.Type); err != nil {
+		if err := store.ResetDeviceQuotaPeriodIfExpired(db, mac, p.Type); err != nil {
 			return err
 		}
-		usage, err := incrementDeviceQuotaPeriod(db, mac, p.Type, deltaDown, deltaUp)
+		usage, err := store.IncrementDeviceQuotaPeriod(db, mac, p.Type, deltaDown, deltaUp)
 		if err != nil {
 			return err
 		}
-		exceeded := deviceQuotaPeriodExceeded(p.Quota, usage)
+		exceeded := store.DeviceQuotaPeriodExceeded(p.Quota, usage)
 		if exceeded != usage.Blocked {
-			if err := setDeviceQuotaPeriodBlocked(db, mac, p.Type, exceeded); err != nil {
+			if err := store.SetDeviceQuotaPeriodBlocked(db, mac, p.Type, exceeded); err != nil {
 				return err
 			}
 		}
@@ -61,7 +62,7 @@ func clearStaleDeviceQuotaBlock(ctx context.Context, db *sql.DB, worker *workera
 		return nil
 	}
 	for _, t := range stale {
-		if err := setDeviceQuotaPeriodBlocked(db, mac, t, false); err != nil {
+		if err := store.SetDeviceQuotaPeriodBlocked(db, mac, t, false); err != nil {
 			return err
 		}
 	}
@@ -79,7 +80,7 @@ func clearStaleDeviceQuotaBlock(ctx context.Context, db *sql.DB, worker *workera
 // for do tipo cota (senao nao ha nada pra reaplicar; o proximo ciclo de
 // reconciliacao cobre).
 func applyDeviceQuotaLive(ctx context.Context, db *sql.DB, worker *workerapi.Client, mac string) {
-	iface, err := hotspotWifiInterface(ctx, db)
+	iface, err := store.HotspotWifiInterface(ctx, db)
 	if err != nil {
 		log.Printf("[backend] reset de cota do dispositivo %s persistido, mas nao foi possivel ler WIFI_INTERFACE: %v", mac, err)
 		return
@@ -93,7 +94,7 @@ func applyDeviceQuotaLive(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 		log.Printf("[backend] reset de cota do dispositivo %s persistido, mas falha ao reler limites: %v", mac, err)
 		return
 	}
-	if limits.LimitType != limitTypeQuota {
+	if limits.LimitType != store.LimitTypeQuota {
 		return
 	}
 	if err := reconcileDeviceQuota(ctx, db, worker, mac, ip, limits, 0, 0); err != nil {
@@ -102,25 +103,25 @@ func applyDeviceQuotaLive(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 }
 
 type hotspotDeviceQuotaPeriodResponse struct {
-	PeriodType    string   `json:"periodType"`
-	QuotaBytes    int64    `json:"quotaBytes"`
-	QuotaUnit     rateUnit `json:"quotaUnit"`
-	DownloadBytes int64    `json:"downloadBytes"`
-	UploadBytes   int64    `json:"uploadBytes"`
-	PeriodStart   string   `json:"periodStart"`
-	PeriodEnd     string   `json:"periodEnd"`
-	Blocked       bool     `json:"blocked"`
+	PeriodType    string         `json:"periodType"`
+	QuotaBytes    int64          `json:"quotaBytes"`
+	QuotaUnit     store.RateUnit `json:"quotaUnit"`
+	DownloadBytes int64          `json:"downloadBytes"`
+	UploadBytes   int64          `json:"uploadBytes"`
+	PeriodStart   string         `json:"periodStart"`
+	PeriodEnd     string         `json:"periodEnd"`
+	Blocked       bool           `json:"blocked"`
 }
 
 // listDeviceQuotaPeriods devolve so os periodos efetivamente
 // configurados (via limits.LimitType/limits.*QuotaBytes) - usada pelo
 // GET admin (hotspot_device_quota.go) e pelo portal de autoatendimento
 // (hotspot_portal.go).
-func listDeviceQuotaPeriods(db *sql.DB, mac string, limits hotspotLimits) ([]hotspotDeviceQuotaPeriodResponse, error) {
-	configured := configuredQuotaPeriods(limits)
+func listDeviceQuotaPeriods(db *sql.DB, mac string, limits store.Limits) ([]hotspotDeviceQuotaPeriodResponse, error) {
+	configured := store.ConfiguredQuotaPeriods(limits)
 	response := make([]hotspotDeviceQuotaPeriodResponse, 0, len(configured))
 	for _, p := range configured {
-		usage, err := ensureDeviceQuotaPeriodRow(db, mac, p.Type)
+		usage, err := store.EnsureDeviceQuotaPeriodRow(db, mac, p.Type)
 		if err != nil {
 			return nil, err
 		}
