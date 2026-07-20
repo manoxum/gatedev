@@ -2,7 +2,7 @@ FROM golang:1.23-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/worker .
+RUN CGO_ENABLED=0 go build -o /out/worker ./cmd/controller
 
 FROM alpine:3.22
 # networkmanager-cli: no Alpine 3.22 o pacote "networkmanager" nao traz

@@ -84,11 +84,11 @@ máquina do usuário da rede Wi-Fi ou da internet.
   `${VAR:-padrao}` quando fizer sentido, documentadas em
   `.env.example` (com comentário explicando obrigatoriedade e efeito)
   e, se alterarem comportamento de negócio, descritas em `RULE.md`.
-- Go em `services/worker/controller` segue a convenção original:
-  poucos arquivos, sem dependências externas (`go.mod` sem `require`)
-  — mantenha assim a menos que haja motivo forte para introduzir uma
-  dependência (por isso a autenticação do backend usa HMAC-SHA256 da
-  biblioteca padrão em vez de bcrypt/JWT de terceiros). `services/backend`
+- Go em `services/worker/controller` não tem dependências externas
+  (`go.mod` sem `require`) — mantenha assim a menos que haja motivo forte
+  para introduzir uma dependência (por isso a autenticação do backend usa
+  HMAC-SHA256 da biblioteca padrão em vez de bcrypt/JWT de terceiros).
+  `services/backend`
   e `services/worker/dns` são a exceção deliberada: `backend` tem
   `github.com/jackc/pgx/v5` (Postgres) e `go.mongodb.org/mongo-driver/v2`
   (Mongo); `services/worker/dns` (dns-provider) tem `github.com/jackc/pgx/v5`
@@ -165,11 +165,17 @@ máquina do usuário da rede Wi-Fi ou da internet.
   antes de considerar a tarefa concluída — extraia funções/componentes
   para arquivos novos em vez de deixar crescer um único arquivo.
 - **Separação de responsabilidade é prioridade**: cada arquivo/função/
-  componente deve ter um propósito único e claro (o padrão já usado
-  neste repo — um arquivo Go por domínio em `services/backend`
-  (`auth.go`, `hotspot.go`, `dns.go`, `certificates.go`, `audit.go`,
-  `db.go`), um componente/página por tela em `services/frontend` — é o
-  modelo a seguir para código novo).
+  componente deve ter um propósito único e claro. Os três serviços Go
+  seguem o layout `cmd/<serviço>/main.go` (só o wiring) + pacotes
+  `internal/` por domínio — `services/backend/internal/{auth,audit,
+  workerapi,dns,cert,hotspot,setup,platform/{config,db}}`,
+  `services/worker/controller/internal/{compose,network,shaping,peer,
+  hotspot,trust}`, `services/worker/dns/internal/{core,config,store,cache,
+  zones,discover,dnsserver,nginx,netdetect}` — e no frontend um
+  componente/página por tela. Esse é o modelo a seguir para código novo.
+  **Em Go um diretório é um pacote**: símbolos usados por outro pacote
+  precisam ser exportados (maiúscula) e as dependências entre pacotes
+  `internal/` têm que formar um DAG (sem ciclos de import).
 - **Priorize criar funções/componentes reutilizáveis** em vez de
   duplicar a mesma lógica em arquivos diferentes: antes de escrever
   algo novo, procure se já existe uma função/componente/hook
@@ -211,13 +217,19 @@ docker-compose.yml    # orquestra todos os serviços
 .env                    # valores reais da máquina (git-ignored)
 services/
   frontend/               # React (Vite/shadcn) - UI do painel de gestão
-  backend/                # Go - API pública do painel (auth, hotspot/DNS, certificados)
+  backend/                # Go - API do painel; cmd/backend + internal/{auth,audit,workerapi,dns,cert,hotspot,setup,platform}
   migration/              # Node/TS + Prisma - aplica o schema do Postgres e encerra
   worker/
-    controller/             # Go - único serviço com docker.sock/NetworkManager/host network
-    hotspot/                # cria o AP Wi-Fi (create_ap)
-    dns/                    # Go - servidor DNS split-horizon proprio (3 views, sem CoreDNS)
+    controller/             # Go - único com docker.sock/NetworkManager/host; cmd/controller + internal/{compose,network,shaping,peer,hotspot,trust}
+    hotspot/                # cria o AP Wi-Fi (create_ap) - shell, não Go
+    dns/                    # Go - DNS split-horizon próprio (3 views); cmd/dns-provider + internal/{core,config,store,cache,zones,discover,dnsserver,nginx,netdetect}
 ```
+Cada serviço Go compila o binário a partir de `cmd/<serviço>` (ver
+`Dockerfile`: `go build ... ./cmd/<serviço>`). Referências a arquivos Go
+neste documento e em `RULE.md` citam o nome do arquivo (ex.:
+`certificates.go`, `hotspot_config_store.go`); o caminho completo agora
+inclui o pacote `internal/` correspondente (ex.:
+`services/backend/internal/cert/certificates.go`).
 `postgres`, `mongo`, `minio` e `redis` são imagens oficiais
 configuradas só no `docker-compose.yml`/`.env`, sem pasta própria em
 `services/`.

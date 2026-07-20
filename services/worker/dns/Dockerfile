@@ -3,7 +3,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /out/dns-provider .
+RUN CGO_ENABLED=0 go build -o /out/dns-provider ./cmd/dns-provider
 
 FROM alpine:3.22
 COPY --from=build /out/dns-provider /usr/local/bin/dns-provider
