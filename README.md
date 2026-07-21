@@ -328,9 +328,10 @@ CLAUDE.md                   # diretrizes para ferramentas de IA neste repo
   `HOST_SOURCE_CIDR`, espera esses IPs e `127.0.0.1` existirem como IPs
   na máquina antes de iniciar. O listener de `HOTSPOT_GATEWAY` é aberto
   depois, automaticamente, quando o hotspot criar esse IP.
-- **Domínio local não resolve no host**: confirme que o resolver do
-  sistema está apontando `127.0.0.1` para os TLDs de `DNS_LOCAL_TLDS`
-  (ex: `systemd-resolved` com drop-in dedicado).
+- **Domínio local não resolve no host**: ao aplicar o DNS, o worker cria
+  ou atualiza a conexão dummy `bindnet-dns` no NetworkManager, apontando
+  `DNS_LOCAL_TLDS` e `DOMAINS` como rotas DNS (`~dominio`) para
+  `127.0.0.1`. Confirme o estado efetivo com `resolvectl status bn-dns`.
 - **Domínio local não resolve dentro de containers de outros projetos**:
   configure o Docker daemon para usar o DNS do `bindnet` como upstream:
   `sudo scripts/configure-docker-dns.sh` e depois reinicie o Docker. Sem

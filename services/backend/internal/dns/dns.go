@@ -112,6 +112,18 @@ func RegisterDNSRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *auth
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		dnsConfig, err := getDNSConfig(r.Context(), db)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// O worker tambem usa DNS_LOCAL_TLDS/DOMAINS para manter as rotas
+		// route-only do resolved/NetworkManager sincronizadas com o
+		// dns-provider. Sem isso, o servidor sabe responder um sufixo novo,
+		// mas consultas normais do host continuam indo para o DNS publico.
+		for key, value := range dnsConfig {
+			hotspotConfig[key] = value
+		}
 		if err := worker.Call(r.Context(), http.MethodPost, "/dns/apply", hotspotConfig, nil); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return

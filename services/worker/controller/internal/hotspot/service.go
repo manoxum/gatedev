@@ -19,7 +19,26 @@ func RegisterServiceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /hotspot/start", handleHotspotServiceAction("start"))
 	mux.HandleFunc("POST /hotspot/stop", handleHotspotServiceAction("stop"))
 	mux.HandleFunc("GET /hotspot/status", handleHotspotServiceStatus)
-	mux.HandleFunc("POST /dns/apply", compose.ApplyServicesHandler([]string{"dns-provider"}))
+	mux.HandleFunc("POST /dns/apply", handleDNSApply)
+}
+
+func handleDNSApply(w http.ResponseWriter, r *http.Request) {
+	var config map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, "configuracao DNS invalida", http.StatusBadRequest)
+		return
+	}
+	if err := compose.ApplyServices([]string{"dns-provider"}); err != nil {
+		log.Printf("[worker] erro ao reiniciar dns-provider: %v", err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if err := network.SyncHostDNSRoutes(config); err != nil {
+		log.Printf("[worker] erro ao sincronizar rotas DNS do host: %v", err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleHotspotServiceAction(action string) http.HandlerFunc {

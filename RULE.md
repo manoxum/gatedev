@@ -793,6 +793,12 @@ Regras:
     quebrada, mesmo a resposta `A` estando correta.
 - Para qualquer outro domínio (em qualquer view), a consulta é
   encaminhada para DNS público (`8.8.8.8`, `1.1.1.1`).
+- Ao aplicar a configuração pelo painel, o worker mantém uma conexão
+  dummy `bindnet-dns` (`bn-dns`) no NetworkManager com `127.0.0.1` como
+  servidor e cada entrada de `DNS_LOCAL_TLDS`/`DOMAINS` como domínio
+  route-only (`~sufixo`). Isso inclui sufixos com vários labels, como
+  `~local.com`, para que o resolver do host envie a consulta ao socket
+  da view host em vez do DNS público da ligação default.
 - O processo **detecta** os gateways das bridges Docker existentes no
   host e lê `HOST_SOURCE_CIDR` (ou auto-detecta os IPs de LAN quando
   vazio), mas isso nunca bloqueia nem derruba o processo: o servidor
