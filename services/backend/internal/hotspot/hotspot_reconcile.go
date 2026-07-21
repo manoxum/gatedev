@@ -72,6 +72,10 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 	if err := reconcileGlobal(ctx, worker, iface); err != nil {
 		log.Printf("[backend] reconciliacao global falhou: %v", err)
 	}
+	// Reaplica o isolamento todo ciclo, mesmo espirito do shaping: e o
+	// que cobre cliente novo conectando, renovacao de DHCP e regra
+	// perdida por reinicio do container - tudo idempotente no worker.
+	applyIsolationLive(ctx, db, worker)
 	if err := applyAutomaticRecharges(db); err != nil {
 		log.Printf("[backend] recarga automatica de credito falhou: %v", err)
 	}

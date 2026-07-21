@@ -644,6 +644,91 @@ scripts tinham, só que dentro do container privilegiado em vez de
   propósito. HTTPS não é interceptado (limitação universal de qualquer
   portal cativo).
 
+## Isolamento de clientes (`services/backend/internal/hotspot/hotspot_isolation*.go`, `services/worker/controller/internal/shaping/isolation*.go`)
+
+- **Interruptor geral**: chave `CLIENT_ISOLATION` em `hotspot_config`
+  (default `false`), editável pela aba Isolamento do painel
+  (`PUT /api/hotspot/isolation`). Ligado, o `entrypoint.sh` sobe o
+  create_ap com `--isolate-clients` (`ap_isolate` do hostapd): o AP
+  para de retransmitir frames entre as próprias estações em L2.
+  **Mudar o interruptor só vale após reiniciar o hotspot** — o
+  `ap_isolate` é fixado no `hostapd.conf` no start; o painel avisa e
+  nunca reinicia sozinho. Se o create_ap baixado não suportar a flag
+  com o isolamento ligado, o entrypoint falha alto em vez de subir um
+  AP silenciosamente sem isolamento.
+- **Mecânica**: com o L2 direto cortado, o worker liga
+  `proxy_arp_pvlan=1` (RFC 3069) e `send_redirects=0` na interface AP —
+  o host responde ARP em nome dos outros clientes e o tráfego
+  cliente↔cliente passa a ser roteado em hairpin
+  (cliente→host→cliente), atravessando `filter/FORWARD` onde o chain
+  `BINDNET-ISOLATION` (jump `-i <ap> -o <ap>`) decide:
+  `RELATED,ESTABLISHED` no topo, um ACCEPT por par permitido
+  (`--mac-source` origem + IP destino, comentários `bn-iso-pair-*`) e
+  DROP no fim — **default deny**. Tráfego cliente→internet
+  (`-o bn-uplink`) e cliente→gateway (painel/DNS/portal, INPUT) nunca
+  passam por esse chain e não são afetados.
+- **Política** (motor puro em `hotspot_isolation_policy.go`): a
+  comunicação de X para Y é decidida pela regra mais **específica** que
+  casar — especificidade = soma das extremidades (dispositivo=2,
+  perfil=1, qualquer=0); empate na mesma especificidade → **bloquear
+  vence**; nenhuma regra → bloqueado. Regras (`hotspot_comm_rules`) têm
+  origem (dispositivo|perfil), destino (dispositivo|perfil|qualquer),
+  sentido e ação (permitir|bloquear).
+- **Firewall por zonas / camada L4** (base em `hotspot_comm_rules`,
+  colunas `zone`/`protocol`/`dst_ports`/`dst_host`, migration
+  `20260721010000_hotspot_firewall_l4`): cada regra tem uma **zona** —
+  `clients` (cliente↔cliente, chain BINDNET-ISOLATION, **implementada**),
+  `wan` (cliente→internet) e `local` (cliente→gateway) reservadas para
+  as camadas seguintes. Uma regra pode restringir por **protocolo**
+  (`any`/`tcp`/`udp`/`icmp`) e **portas de destino** (`dst_ports`, lista
+  `80,443,8000-8100`, só com tcp/udp). Na zona clients, o motor emite,
+  por par ordenado (MAC origem→IP destino), as entradas **na ordem em
+  que o firewall avalia**: ponta mais específica primeiro, depois L4
+  mais específico (protocolo/porta concretos acima de `any`), e
+  bloquear antes de permitir em empate. O worker reconstrói o chain só
+  quando essa assinatura ordenada muda (idempotente por comparação de
+  comentários), instala cada entrada como ACCEPT/DROP com
+  `-p <proto> -m multiport --dports <portas>` e mantém o DROP final
+  (default deny). Assim "permitir TCP/443 entre A e B" libera só 443 e o
+  resto cai no DROP; "bloquear UDP + permitir tudo" bloqueia só UDP.
+  Regras retrocompatíveis: sem zona = `clients`, sem protocolo = `any`.
+- **Modalidades no painel** (aba Isolamento): uma regra tem dois
+  escopos na UI. **Dentro de um perfil** = comunicação entre os
+  clientes do mesmo perfil; é gravada como uma regra normal com origem
+  **e** destino iguais ao mesmo perfil (perfil↔próprio-perfil,
+  especificidade 2) — não há mais um flag separado por perfil, é uma
+  regra como as outras. **Entre origem e destino** = origem e destino
+  distintos (dispositivo|perfil, destino também "todos os clientes").
+  Assim: dispositivo↔qualquer bloquear empata com a regra interna do
+  perfil e vence (cliente totalmente isolado); dispositivo↔dispositivo
+  permitir (especificidade 4) vence tudo (exceção pontual). A coluna
+  `hotspot_profiles.allow_internal_communication` continua no banco e o
+  motor ainda a respeita como allow implícito perfil↔próprio-perfil,
+  mas o painel não a define mais (fica sempre `false`) — a comunicação
+  interna é expressa por regra mesmo-perfil.
+- **Sentido** (`direction`): `to` = a origem pode **iniciar** tráfego
+  para o destino; as respostas voltam pelo conntrack
+  (`RELATED,ESTABLISHED`), senão TCP não funcionaria. `both` = os dois
+  podem iniciar. O caso "só destino→origem" da UI é gravado com as
+  extremidades trocadas — o banco só conhece `to`/`both`.
+- **Aplicação**: o backend compila o estado desejado completo (pares
+  MAC origem→IP destino dos clientes conectados agora) e o worker
+  materializa idempotente (`POST /hotspot/isolation/apply`), sem
+  estado local — mesmo modelo do shaping. Reaplicado a cada ciclo de
+  reconciliação (~15s: cobre cliente novo, renovação de DHCP e regra
+  perdida por reinício de container), em toda mutação de
+  regra/perfil/vínculo, e com retry pós-start
+  (`reapplyHotspotIsolation`); o stop do hotspot desmonta
+  chain/sysctls. Janela de até um ciclo para pares novos valerem é
+  aceite por desenho.
+- **Limitações aceites**: com o isolamento ligado, broadcast/multicast
+  entre clientes (mDNS/Chromecast/descoberta de impressora) não
+  funciona nem entre pares permitidos — só unicast roteado; IPv6
+  link-local entre clientes fica bloqueado por desenho (`ap_isolate`
+  corta o L2 e não há proxy NDP). Regras de perfil apagado somem junto
+  com o perfil (mesma transação de `DeleteProfile`); os dispositivos
+  dele voltam ao perfil Padrão.
+
 ## Serviço `dns-provider` (servidor DNS split-horizon próprio — `services/worker/dns/`)
 
 Não usa mais CoreDNS/Corefile — é um binário Go próprio (`miekg/dns`),

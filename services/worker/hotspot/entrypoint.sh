@@ -63,6 +63,7 @@ load_runtime_config_from_db() {
   HOTSPOT_DNS_FALLBACKS="1.1.1.1,8.8.8.8"
   BINDNET_UPLINK_INTERFACE="bn-uplink"
   UPLINK_MONITOR_INTERVAL="10"
+  CLIENT_ISOLATION="false"
 
   local rows
   rows="$(psql_hotspot -At -F $'\t' -c "
@@ -82,7 +83,8 @@ load_runtime_config_from_db() {
       'HOTSPOT_CIDR',
       'HOTSPOT_DNS_FALLBACKS',
       'BINDNET_UPLINK_INTERFACE',
-      'UPLINK_MONITOR_INTERVAL'
+      'UPLINK_MONITOR_INTERVAL',
+      'CLIENT_ISOLATION'
     )
   " 2>/tmp/bindnet-hotspot-db-error.log)" || {
     log "ERRO: falha ao ler hotspot_config: $(cat /tmp/bindnet-hotspot-db-error.log 2>/dev/null || true)"
@@ -94,7 +96,7 @@ load_runtime_config_from_db() {
   while IFS=$'\t' read -r key value; do
     [[ -n "${key}" ]] || continue
     case "${key}" in
-      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_OPEN|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL)
+      WIFI_INTERFACE|INTERNET_INTERFACE|WIFI_SSID|WIFI_PASSWORD|WIFI_OPEN|WIFI_COUNTRY|WIFI_CHANNEL|WIFI_FREQ_BAND|WIFI_CHANNEL_CANDIDATES|HOTSPOT_GATEWAY|HOTSPOT_CIDR|HOTSPOT_DNS_FALLBACKS|BINDNET_UPLINK_INTERFACE|UPLINK_MONITOR_INTERVAL|CLIENT_ISOLATION)
         printf -v "${key}" '%s' "${value}"
         export "${key}"
         ;;
@@ -545,6 +547,20 @@ try_create_ap() {
   fi
   log "Seguranca: ${security_display}."
 
+  # CLIENT_ISOLATION=true liga o ap_isolate do hostapd
+  # (--isolate-clients): o AP para de retransmitir frames entre as
+  # proprias estacoes em L2, e todo trafego cliente<->cliente passa a
+  # depender do hairpin L3 controlado pelo worker (proxy_arp_pvlan +
+  # chain BINDNET-ISOLATION, ver internal/shaping/isolation_rules.go) -
+  # e la que as regras de comunicacao do painel sao aplicadas.
+  local -a isolation_args=()
+  if [[ "${CLIENT_ISOLATION:-false}" == "true" ]]; then
+    isolation_args=(--isolate-clients)
+    log "Isolamento de clientes: ATIVADO (ap_isolate; comunicacao entre clientes controlada pelas regras do painel)."
+  else
+    log "Isolamento de clientes: desativado (clientes comunicam livremente entre si)."
+  fi
+
   # Roda em segundo plano e usa "wait $PID" (em vez de um pipe em
   # primeiro plano) de proposito: o bash so garante que um trap (ver
   # "trap cleanup EXIT" / "trap ... INT TERM" mais abaixo) interrompe e
@@ -556,6 +572,7 @@ try_create_ap() {
   # remove_stale_virtual_interfaces acima).
   create_ap \
     "${virtual_interface_args[@]}" \
+    "${isolation_args[@]}" \
     --no-dns \
     --dhcp-dns "${DHCP_DNS_SERVERS}" \
     --country "${country}" \
@@ -648,6 +665,14 @@ fi
 
 if ! grep -q -- '--dhcp-dns' <<< "${CREATE_AP_HELP}"; then
   log "ERRO: a versao baixada do create_ap nao suporta --dhcp-dns."
+  exit 1
+fi
+
+# So bloqueia quando o isolamento esta LIGADO no painel: subir o AP sem
+# ap_isolate com o operador contando com clientes isolados seria uma
+# falha de seguranca silenciosa - melhor falhar alto aqui.
+if [[ "${CLIENT_ISOLATION:-false}" == "true" ]] && ! grep -q -- '--isolate-clients' <<< "${CREATE_AP_HELP}"; then
+  log "ERRO: o isolamento de clientes esta ativado no painel, mas a versao baixada do create_ap nao suporta --isolate-clients."
   exit 1
 fi
 

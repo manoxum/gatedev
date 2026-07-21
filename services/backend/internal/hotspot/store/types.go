@@ -83,14 +83,19 @@ type Profile struct {
 	CreditRechargeAmountBytes *int64  `json:"creditRechargeAmountBytes"`
 	CreditRechargePeriod      *string `json:"creditRechargePeriod"`
 	CreditPlafondBytes        *int64  `json:"creditPlafondBytes"`
+	// Com o isolamento de clientes ligado (chave CLIENT_ISOLATION em
+	// hotspot_config), decide se os clientes deste perfil comunicam
+	// entre si - ver hotspot_isolation_policy.go.
+	AllowInternalCommunication bool `json:"allowInternalCommunication"`
 }
 
 type ProfileRequest struct {
 	Name string `json:"name"`
 	Limits
-	CreditRechargeAmountBytes *int64  `json:"creditRechargeAmountBytes"`
-	CreditRechargePeriod      *string `json:"creditRechargePeriod"`
-	CreditPlafondBytes        *int64  `json:"creditPlafondBytes"`
+	CreditRechargeAmountBytes  *int64  `json:"creditRechargeAmountBytes"`
+	CreditRechargePeriod       *string `json:"creditRechargePeriod"`
+	CreditPlafondBytes         *int64  `json:"creditPlafondBytes"`
+	AllowInternalCommunication bool    `json:"allowInternalCommunication"`
 }
 
 type DeviceInfo struct {

@@ -23,6 +23,7 @@ var hotspotConfigKeys = []string{
 	"HOTSPOT_DNS_FALLBACKS",
 	"BINDNET_UPLINK_INTERFACE",
 	"UPLINK_MONITOR_INTERVAL",
+	"CLIENT_ISOLATION",
 }
 
 var hotspotConfigDefaults = map[string]string{
@@ -36,6 +37,10 @@ var hotspotConfigDefaults = map[string]string{
 	"HOTSPOT_DNS_FALLBACKS":    "1.1.1.1,8.8.8.8",
 	"BINDNET_UPLINK_INTERFACE": "bn-uplink",
 	"UPLINK_MONITOR_INTERVAL":  "10",
+	// Interruptor geral do isolamento de clientes (ap_isolate no
+	// create_ap + chain BINDNET-ISOLATION no worker) - mudar exige
+	// reiniciar o hotspot, ver hotspot_isolation.go.
+	"CLIENT_ISOLATION": "false",
 }
 
 // requiredHotspotRuntimeKeys nao inclui WIFI_PASSWORD: quando
@@ -111,6 +116,9 @@ func SaveHotspotConfig(ctx context.Context, db *sql.DB, values map[string]string
 	}
 	if open, ok := clean["WIFI_OPEN"]; ok && open != "true" && open != "false" {
 		return errors.New("WIFI_OPEN deve ser 'true' ou 'false'")
+	}
+	if isolation, ok := clean["CLIENT_ISOLATION"]; ok && isolation != "true" && isolation != "false" {
+		return errors.New("CLIENT_ISOLATION deve ser 'true' ou 'false'")
 	}
 	// A validacao de tamanho minimo so vale para hotspot com senha - um
 	// PATCH que liga WIFI_OPEN e WIFI_PASSWORD (vazio ou nao) na mesma

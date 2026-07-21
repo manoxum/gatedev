@@ -58,6 +58,7 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 		if err == nil {
 			reapplyHotspotBlocklist(r.Context(), db, worker, iface)
 			reapplyHotspotShaping(r.Context(), worker, iface)
+			reapplyHotspotIsolation(r.Context(), db, worker)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -86,6 +87,7 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 		}
 		reapplyHotspotBlocklist(r.Context(), db, worker, iface)
 		reapplyHotspotShaping(r.Context(), worker, iface)
+		reapplyHotspotIsolation(r.Context(), db, worker)
 		if err := store.SetHotspotDesiredState(r.Context(), db, true); err != nil {
 			log.Printf("[backend] falha ao gravar estado desejado do hotspot (ligado): %v", err)
 		}
@@ -109,6 +111,12 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 			// NetworkManager depois que o hotspot para.
 			if err := worker.Call(r.Context(), http.MethodPost, "/network/wifi-manage", map[string]string{"interface": iface}, nil); err != nil {
 				log.Printf("[backend] aviso: falha ao devolver %s ao NetworkManager: %v", iface, err)
+			}
+			// Desmonta o chain/sysctls do isolamento junto com o hotspot -
+			// higiene, igual ao teardown do shaping: nada disso deve
+			// sobreviver com o AP parado.
+			if err := teardownIsolationWorker(r.Context(), worker, iface); err != nil {
+				log.Printf("[backend] aviso: falha ao desmontar isolamento de clientes: %v", err)
 			}
 		}
 		if err := store.SetHotspotDesiredState(r.Context(), db, false); err != nil {

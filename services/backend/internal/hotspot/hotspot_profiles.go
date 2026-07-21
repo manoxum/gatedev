@@ -99,6 +99,9 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 			return
 		}
 		applyProfileShapingLive(r.Context(), db, worker, id)
+		// allowInternalCommunication pode ter mudado - reaplica a
+		// politica de isolamento dos clientes conectados agora.
+		applyIsolationLive(r.Context(), db, worker)
 		username, _ := auth.SessionUser(r, admin)
 		audit.Record(r.Context(), "profile_updated", username, map[string]any{"id": id, "name": profile.Name})
 		w.Header().Set("Content-Type", "application/json")
@@ -114,6 +117,9 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		// Dispositivos do perfil apagado voltaram pro Padrao e as regras
+		// que o referenciavam sumiram - reavalia o isolamento ao vivo.
+		applyIsolationLive(r.Context(), db, worker)
 		username, _ := auth.SessionUser(r, admin)
 		audit.Record(r.Context(), "profile_deleted", username, map[string]any{"id": id})
 		w.WriteHeader(http.StatusNoContent)
@@ -142,6 +148,9 @@ func RegisterHotspotProfileRoutes(mux *http.ServeMux, admin *auth.Administrator,
 			return
 		}
 		applyDeviceShapingLive(r.Context(), db, worker, mac)
+		// O perfil efetivo do dispositivo mudou - as regras de
+		// isolamento baseadas em perfil valem/deixam de valer pra ele.
+		applyIsolationLive(r.Context(), db, worker)
 		if _, err := syncDeviceCreditFromProfile(r.Context(), db, worker, mac); err != nil {
 			// best-effort - o vinculo ja foi persistido, so a
 			// sincronizacao imediata do credito falhou (ex.: worker

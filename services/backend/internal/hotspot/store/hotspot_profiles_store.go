@@ -21,7 +21,8 @@ const profileColumns = `
 	download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
 	limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
 	monthly_quota_bytes, monthly_quota_unit,
-	credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes
+	credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes,
+	allow_internal_communication
 `
 
 func scanProfile(row interface{ Scan(...any) error }) (Profile, error) {
@@ -30,7 +31,8 @@ func scanProfile(row interface{ Scan(...any) error }) (Profile, error) {
 		&p.DownloadRateValue, &p.DownloadRateUnit, &p.UploadRateValue, &p.UploadRateUnit,
 		&p.LimitType, &p.DailyQuotaBytes, &p.DailyQuotaUnit, &p.WeeklyQuotaBytes, &p.WeeklyQuotaUnit,
 		&p.MonthlyQuotaBytes, &p.MonthlyQuotaUnit,
-		&p.CreditRechargeAmountBytes, &p.CreditRechargePeriod, &p.CreditPlafondBytes)
+		&p.CreditRechargeAmountBytes, &p.CreditRechargePeriod, &p.CreditPlafondBytes,
+		&p.AllowInternalCommunication)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -74,14 +76,16 @@ func InsertProfile(db *sql.DB, req ProfileRequest) (Profile, error) {
 			name, download_rate_value, download_rate_unit, upload_rate_value, upload_rate_unit,
 			limit_type, daily_quota_bytes, daily_quota_unit, weekly_quota_bytes, weekly_quota_unit,
 			monthly_quota_bytes, monthly_quota_unit,
-			credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes
+			credit_recharge_amount_bytes, credit_recharge_period, credit_plafond_bytes,
+			allow_internal_communication
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING `+profileColumns,
 		req.Name, req.DownloadRateValue, req.DownloadRateUnit, req.UploadRateValue, req.UploadRateUnit,
 		req.LimitType, req.DailyQuotaBytes, req.DailyQuotaUnit, req.WeeklyQuotaBytes, req.WeeklyQuotaUnit,
 		req.MonthlyQuotaBytes, req.MonthlyQuotaUnit,
 		req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
+		req.AllowInternalCommunication,
 	))
 	if isUniqueViolation(err) {
 		return Profile{}, ErrHotspotProfileNameTaken
@@ -97,6 +101,7 @@ func UpdateProfile(db *sql.DB, id string, req ProfileRequest) (Profile, bool, er
 		    limit_type = $7, daily_quota_bytes = $8, daily_quota_unit = $9, weekly_quota_bytes = $10, weekly_quota_unit = $11,
 		    monthly_quota_bytes = $12, monthly_quota_unit = $13,
 		    credit_recharge_amount_bytes = $14, credit_recharge_period = $15, credit_plafond_bytes = $16,
+		    allow_internal_communication = $17,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1
 		RETURNING `+profileColumns,
@@ -104,6 +109,7 @@ func UpdateProfile(db *sql.DB, id string, req ProfileRequest) (Profile, bool, er
 		req.LimitType, req.DailyQuotaBytes, req.DailyQuotaUnit, req.WeeklyQuotaBytes, req.WeeklyQuotaUnit,
 		req.MonthlyQuotaBytes, req.MonthlyQuotaUnit,
 		req.CreditRechargeAmountBytes, req.CreditRechargePeriod, req.CreditPlafondBytes,
+		req.AllowInternalCommunication,
 	))
 	if isUniqueViolation(err) {
 		return Profile{}, false, ErrHotspotProfileNameTaken
@@ -138,6 +144,13 @@ func DeleteProfile(db *sql.DB, id string) error {
 	defer tx.Rollback()
 
 	if _, err := tx.Exec(`UPDATE hotspot_device_info SET profile_id = $1 WHERE profile_id = $2`, DefaultProfileID, id); err != nil {
+		return err
+	}
+	// Regras de comunicacao que referenciam o perfil sao removidas na
+	// mesma transacao (refs polimorficas, sem FK no banco - ver
+	// hotspot_comm_rules.go): regra orfa apontando pra perfil apagado
+	// nunca deve sobrar avaliavel no motor de isolamento.
+	if err := deleteCommRulesForProfileTx(tx, id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM hotspot_profiles WHERE id = $1`, id); err != nil {

@@ -89,6 +89,7 @@ func main() {
 	hotspot.RegisterHotspotSessionRoutes(mux, admin, database, creditTrace)
 	hotspot.RegisterHotspotStatsRoutes(mux, admin, database, worker)
 	hotspot.RegisterHotspotProfileRoutes(mux, admin, database, worker, auditClient)
+	hotspot.RegisterHotspotIsolationRoutes(mux, admin, database, worker, auditClient)
 	hotspot.RegisterHotspotVoucherRoutes(mux, admin, database, auditClient)
 	hotspot.RegisterHotspotPortalRoutes(mux, database, worker, auditClient)
 	dns.RegisterDNSRoutes(mux, worker, admin, auditClient, database)

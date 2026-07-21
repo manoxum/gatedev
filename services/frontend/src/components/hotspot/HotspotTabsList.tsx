@@ -1,4 +1,4 @@
-import { Ban, History, ScrollText, Ticket, UserCog, Wifi } from "lucide-react";
+import { Ban, History, ScrollText, Shield, Ticket, UserCog, Wifi } from "lucide-react";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface HotspotTabsListProps {
@@ -14,7 +14,9 @@ interface HotspotTabsListProps {
 // de componente.
 export function HotspotTabsList({ connectedCount, blockedCount }: HotspotTabsListProps) {
   return (
-    <TabsList className="grid h-auto w-full grid-cols-6 sm:inline-grid sm:w-auto">
+    // 7 abas nao cabem numa linha no celular - 4 colunas x 2 linhas
+    // abaixo de sm, linha unica automatica no desktop.
+    <TabsList className="grid h-auto w-full grid-cols-4 sm:inline-grid sm:w-auto sm:grid-cols-7">
       <TabsTrigger value="connected" className="gap-2">
         <Wifi className="h-4 w-4" />
         Conectados
@@ -36,6 +38,10 @@ export function HotspotTabsList({ connectedCount, blockedCount }: HotspotTabsLis
       <TabsTrigger value="profiles">
         <UserCog className="h-4 w-4" />
         Perfis
+      </TabsTrigger>
+      <TabsTrigger value="isolation">
+        <Shield className="h-4 w-4" />
+        Isolamento
       </TabsTrigger>
       <TabsTrigger value="vouchers">
         <Ticket className="h-4 w-4" />

@@ -465,6 +465,11 @@ model HotspotProfile {
   creditRechargePeriod      String?  @map("credit_recharge_period")
   creditPlafondBytes        BigInt?  @map("credit_plafond_bytes")
 
+  // Isolamento de clientes (hotspot_isolation.go): com o interruptor
+  // geral CLIENT_ISOLATION ligado, decide se os clientes deste perfil
+  // comunicam entre si. Default false (tudo bloqueado ate configurar).
+  allowInternalCommunication Boolean @default(false) @map("allow_internal_communication")
+
   // Shape novo (ver comentario em HotspotDeviceLimits acima) - creditEnabled
   // acima fica no banco sem uso do Go novo: limitType e que decide se a
   // politica de credito (recharge/plafond, linhas acima) esta ativa.
@@ -480,6 +485,43 @@ model HotspotProfile {
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("hotspot_profiles")
+}
+
+// Regra de comunicacao entre clientes do hotspot
+// (services/backend/internal/hotspot/hotspot_isolation.go). Refs
+// polimorficas: sourceKind device (sourceRef = MAC normalizado) ou
+// profile (sourceRef = UUID de HotspotProfile); targetKind aceita
+// tambem 'any' (targetRef NULL). Sem @relation de proposito (mesmo
+// idioma do resto do schema, so colunas simples); regras de um perfil
+// apagado sao removidas pela aplicacao. direction 'to' = source pode
+// iniciar trafego para target; 'both' = os dois podem iniciar.
+model HotspotCommRule {
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sourceKind String  @map("source_kind")
+  sourceRef  String  @map("source_ref")
+  targetKind String  @map("target_kind")
+  targetRef  String? @map("target_ref")
+  direction  String  @default("both")
+  action     String
+  enabled    Boolean @default(true)
+  note       String?
+
+  // Base do firewall por zonas (migration 20260721010000). zone: caminho
+  // de tráfego ('clients'|'wan'|'local'). protocol: 'any'|'tcp'|'udp'|'icmp'.
+  // dstPorts: lista de portas/intervalos de destino (null = qualquer).
+  // dstHost: IP/CIDR de destino externo, só na zona 'wan' (null = qualquer).
+  zone     String  @default("clients")
+  protocol String  @default("any")
+  dstPorts String? @map("dst_ports")
+  dstHost  String? @map("dst_host")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@index([sourceKind, sourceRef])
+  @@index([targetKind, targetRef])
+  @@index([zone])
+  @@map("hotspot_comm_rules")
 }
 
 // Lote de vouchers (services/backend/hotspot_vouchers.go) - agrupa os

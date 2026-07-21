@@ -51,6 +51,7 @@ func main() {
 	trust.RegisterRoutes(mux)
 	shaping.RegisterShapingRoutes(mux)
 	shaping.RegisterTrafficBlockRoutes(mux)
+	shaping.RegisterIsolationRoutes(mux)
 	shaping.RegisterCaptivePortalRoutes(mux)
 	shaping.StartCaptivePortalResponder()
 
