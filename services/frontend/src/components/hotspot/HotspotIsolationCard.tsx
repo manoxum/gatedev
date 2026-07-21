@@ -3,6 +3,7 @@ import { Plus, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { HotspotFirewallPolicyCard } from "@/components/hotspot/HotspotFirewallPolicyCard";
 import { HotspotIsolationRuleDialog, type CommEndpointOption } from "@/components/hotspot/HotspotIsolationRuleDialog";
 import { HotspotIsolationRulesTable } from "@/components/hotspot/HotspotIsolationRulesTable";
 import { useHotspotCommRules, useHotspotIsolationState } from "@/components/hotspot/useHotspotIsolationQueries";
@@ -107,6 +108,11 @@ export function HotspotIsolationCard({ knownDevices }: HotspotIsolationCardProps
             ativo, descoberta por broadcast/mDNS (ex.: Chromecast, impressoras) não funciona entre clientes, mesmo
             entre pares permitidos.
           </span>
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium">Política padrão do firewall</h3>
+          <HotspotFirewallPolicyCard />
         </div>
 
         <HotspotIsolationRulesTable

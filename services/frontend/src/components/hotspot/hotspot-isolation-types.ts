@@ -16,7 +16,8 @@ export type CommProtocol = "any" | "tcp" | "udp" | "icmp";
 export interface HotspotCommRule {
   id: string;
   zone: CommZone;
-  sourceKind: CommEndpointKind;
+  // 'any' como origem só existe nas zonas wan/local (todos os clientes).
+  sourceKind: CommTargetKind;
   sourceRef: string;
   targetKind: CommTargetKind;
   targetRef: string | null;

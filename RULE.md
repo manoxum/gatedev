@@ -677,9 +677,9 @@ scripts tinham, só que dentro do container privilegiado em vez de
 - **Firewall por zonas / camada L4** (base em `hotspot_comm_rules`,
   colunas `zone`/`protocol`/`dst_ports`/`dst_host`, migration
   `20260721010000_hotspot_firewall_l4`): cada regra tem uma **zona** —
-  `clients` (cliente↔cliente, chain BINDNET-ISOLATION, **implementada**),
-  `wan` (cliente→internet) e `local` (cliente→gateway) reservadas para
-  as camadas seguintes. Uma regra pode restringir por **protocolo**
+  `clients` (cliente↔cliente, chain BINDNET-ISOLATION), `wan`
+  (cliente→internet, chain BINDNET-FW-WAN) e `local` (cliente→gateway,
+  chain BINDNET-FW-LOCAL). Uma regra pode restringir por **protocolo**
   (`any`/`tcp`/`udp`/`icmp`) e **portas de destino** (`dst_ports`, lista
   `80,443,8000-8100`, só com tcp/udp). Na zona clients, o motor emite,
   por par ordenado (MAC origem→IP destino), as entradas **na ordem em
@@ -692,6 +692,31 @@ scripts tinham, só que dentro do container privilegiado em vez de
   (default deny). Assim "permitir TCP/443 entre A e B" libera só 443 e o
   resto cai no DROP; "bloquear UDP + permitir tudo" bloqueia só UDP.
   Regras retrocompatíveis: sem zona = `clients`, sem protocolo = `any`.
+- **Zonas wan e local** (`hotspot_firewall_policy.go`,
+  `services/worker/controller/internal/shaping/firewall_{zones,wan,local}.go`):
+  ao contrário da zona clients, **não** dependem de `ap_isolate` nem de
+  reiniciar o hotspot — são puro iptables aplicado ao vivo enquanto o
+  hotspot roda (reconciliação, reaplicação pós-start e teardown no stop,
+  ver `hotspot_firewall_apply.go`). Cada regra casa pela **origem**
+  (dispositivo|perfil|todos os clientes) + L4; a zona `wan` aceita ainda
+  um `dst_host` (IP/CIDR externo). Cada zona tem uma **política padrão**
+  (`FW_WAN_POLICY`/`FW_LOCAL_POLICY` em `hotspot_config`, default
+  `allow`) para o tráfego que nenhuma regra cobre — default `allow` de
+  propósito: adicionar o firewall não muda nada até haver regras, e nunca
+  corta internet/painel sozinho.
+  - **wan** (`BINDNET-FW-WAN`, jump em FORWARD para `-i <ap> -o
+    <uplink>`): usa **RETURN** para "permitir" (o pacote segue para
+    `BINDNET-HOTSPOT`, onde ainda passam o bloqueio por crédito e o
+    MASQUERADE — permitir na wan **não** fura o crédito) e **DROP** para
+    "bloquear". O jump é mantido **acima** do de `BINDNET-HOTSPOT` no
+    FORWARD (senão o ACCEPT genérico do hotspot liberaria antes das
+    regras de bloqueio); a correção de ordem acontece no ciclo de
+    reconciliação (janela ≤15s após uma troca de uplink).
+  - **local** (`BINDNET-FW-LOCAL`, jump em INPUT para `-i <ap>`): usa
+    **ACCEPT** para "permitir" e **DROP** para "bloquear". No topo há
+    permissões **fixas e inegociáveis** (established, DHCP, DNS, painel
+    HTTP/HTTPS, ICMP) para o operador nunca se trancar fora do
+    painel/rede, mesmo com política `deny`.
 - **Modalidades no painel** (aba Isolamento): uma regra tem dois
   escopos na UI. **Dentro de um perfil** = comunicação entre os
   clientes do mesmo perfil; é gravada como uma regra normal com origem

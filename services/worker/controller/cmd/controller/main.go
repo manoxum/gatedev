@@ -52,6 +52,7 @@ func main() {
 	shaping.RegisterShapingRoutes(mux)
 	shaping.RegisterTrafficBlockRoutes(mux)
 	shaping.RegisterIsolationRoutes(mux)
+	shaping.RegisterFirewallRoutes(mux)
 	shaping.RegisterCaptivePortalRoutes(mux)
 	shaping.StartCaptivePortalResponder()
 

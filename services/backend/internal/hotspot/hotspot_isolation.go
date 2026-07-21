@@ -144,7 +144,7 @@ func RegisterHotspotIsolationRoutes(mux *http.ServeMux, admin *auth.Administrato
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		applyIsolationLive(r.Context(), db, worker)
+		applyCommRuleLive(r.Context(), db, worker)
 		username, _ := auth.SessionUser(r, admin)
 		audit.Record(r.Context(), "comm_rule_created", username, map[string]any{"id": rule.ID, "action": rule.Action})
 		w.Header().Set("Content-Type", "application/json")
@@ -166,7 +166,7 @@ func RegisterHotspotIsolationRoutes(mux *http.ServeMux, admin *auth.Administrato
 			http.Error(w, "regra nao encontrada", http.StatusNotFound)
 			return
 		}
-		applyIsolationLive(r.Context(), db, worker)
+		applyCommRuleLive(r.Context(), db, worker)
 		username, _ := auth.SessionUser(r, admin)
 		audit.Record(r.Context(), "comm_rule_updated", username, map[string]any{"id": rule.ID, "action": rule.Action})
 		w.Header().Set("Content-Type", "application/json")
@@ -184,7 +184,7 @@ func RegisterHotspotIsolationRoutes(mux *http.ServeMux, admin *auth.Administrato
 			http.Error(w, "regra nao encontrada", http.StatusNotFound)
 			return
 		}
-		applyIsolationLive(r.Context(), db, worker)
+		applyCommRuleLive(r.Context(), db, worker)
 		username, _ := auth.SessionUser(r, admin)
 		audit.Record(r.Context(), "comm_rule_deleted", username, map[string]any{"id": id})
 		w.WriteHeader(http.StatusNoContent)

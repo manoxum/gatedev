@@ -149,14 +149,7 @@ func applicableRulesForPair(srcMAC, dstMAC string, profileOf map[string]string, 
 // sem perfil conhecido caem no perfil Padrao (mesma semantica do
 // COALESCE de HotspotDeviceProfileRefs).
 func compileClientsZonePairs(clients []isolationClient, profileOf map[string]string, internalAllow map[string]bool, rules []store.CommRule) []firewallPairRule {
-	effectiveProfiles := make(map[string]string, len(clients))
-	for _, client := range clients {
-		if profileID, ok := profileOf[client.MAC]; ok && profileID != "" {
-			effectiveProfiles[client.MAC] = profileID
-		} else {
-			effectiveProfiles[client.MAC] = store.DefaultProfileID
-		}
-	}
+	effectiveProfiles := effectiveProfileMap(clients, profileOf)
 
 	pairs := []firewallPairRule{}
 	for _, src := range clients {
@@ -189,4 +182,20 @@ func hasAllow(entries []applicableRule) bool {
 		}
 	}
 	return false
+}
+
+// effectiveProfileMap resolve o perfil efetivo de cada MAC conectado -
+// MAC sem perfil conhecido cai no perfil Padrao (mesma semantica do
+// COALESCE de HotspotDeviceProfileRefs). Compartilhado pelas zonas
+// clients/wan/local.
+func effectiveProfileMap(clients []isolationClient, profileOf map[string]string) map[string]string {
+	effective := make(map[string]string, len(clients))
+	for _, client := range clients {
+		if profileID, ok := profileOf[client.MAC]; ok && profileID != "" {
+			effective[client.MAC] = profileID
+		} else {
+			effective[client.MAC] = store.DefaultProfileID
+		}
+	}
+	return effective
 }

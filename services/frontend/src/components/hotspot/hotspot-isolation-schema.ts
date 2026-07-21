@@ -3,6 +3,8 @@ import type { HotspotCommRule, HotspotCommRuleRequest } from "@/components/hotsp
 
 // "80", "80,443", "8000-8100", "53,80,1000-2000" - portas de destino.
 const PORT_LIST_PATTERN = /^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$/;
+// IPv4 simples ou CIDR (destino externo da zona wan).
+const HOST_PATTERN = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
 
 function isValidPortList(list: string): boolean {
   if (!PORT_LIST_PATTERN.test(list)) return false;
@@ -14,24 +16,24 @@ function isValidPortList(list: string): boolean {
   );
 }
 
-// O formulário tem duas modalidades ("escopo"):
-//  - within-profile: comunicação entre clientes do MESMO perfil. É
-//    gravada como uma regra normal com origem e destino iguais ao
-//    mesmo perfil (o motor de política trata isso como "interno").
-//  - endpoints: comunicação entre uma origem e um destino distintos
-//    (perfil ou cliente; o destino também pode ser "todos os clientes").
+// O formulário é guiado primeiro pela ZONA:
+//  - clients: entre clientes (modalidade within-profile ou endpoints);
+//  - wan: cliente -> internet (origem + protocolo/portas + host externo);
+//  - local: cliente -> painel/gateway (origem + protocolo/portas).
 export const hotspotCommRuleFormSchema = z
   .object({
+    zone: z.enum(["clients", "wan", "local"]),
+    // clients
     scope: z.enum(["within-profile", "endpoints"]),
-    // within-profile
     profileRef: z.string(),
-    // endpoints
-    sourceKind: z.enum(["profile", "device"]),
+    sourceKind: z.enum(["profile", "device", "any"]),
     sourceRef: z.string(),
     targetKind: z.enum(["profile", "device", "any"]),
     targetRef: z.string(),
     directionUi: z.enum(["to", "from", "both"]),
-    // L4 (opcional): restringe a regra a um protocolo/portas de destino.
+    // wan
+    dstHost: z.string(),
+    // L4 (opcional)
     protocol: z.enum(["any", "tcp", "udp", "icmp"]),
     dstPorts: z.string(),
     // comuns
@@ -42,18 +44,19 @@ export const hotspotCommRuleFormSchema = z
   .superRefine((values, ctx) => {
     if (values.dstPorts.trim()) {
       if (values.protocol !== "tcp" && values.protocol !== "udp") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["dstPorts"],
-          message: "Portas só com protocolo TCP ou UDP",
-        });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dstPorts"], message: "Portas só com protocolo TCP ou UDP" });
       } else if (!isValidPortList(values.dstPorts.trim())) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["dstPorts"],
-          message: "Portas inválidas (ex.: 80,443,8000-8100)",
-        });
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dstPorts"], message: "Portas inválidas (ex.: 80,443,8000-8100)" });
       }
+    }
+    if (values.zone === "wan" && values.dstHost.trim() && !HOST_PATTERN.test(values.dstHost.trim())) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dstHost"], message: "Use um IP ou CIDR (ex.: 1.2.3.4 ou 10.0.0.0/24)" });
+    }
+    if (values.zone !== "clients") {
+      if (values.sourceKind !== "any" && !values.sourceRef) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sourceRef"], message: "Escolha a origem" });
+      }
+      return;
     }
     if (values.scope === "within-profile") {
       if (!values.profileRef) {
@@ -73,17 +76,14 @@ export const hotspotCommRuleFormSchema = z
       values.sourceRef &&
       values.sourceRef === values.targetRef
     ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["targetRef"],
-        message: "Origem e destino não podem ser o mesmo dispositivo",
-      });
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["targetRef"], message: "Origem e destino não podem ser o mesmo dispositivo" });
     }
   });
 
 export type HotspotCommRuleFormValues = z.infer<typeof hotspotCommRuleFormSchema>;
 
 export const emptyCommRuleFormValues: HotspotCommRuleFormValues = {
+  zone: "clients",
   scope: "within-profile",
   profileRef: "",
   sourceKind: "profile",
@@ -91,6 +91,7 @@ export const emptyCommRuleFormValues: HotspotCommRuleFormValues = {
   targetKind: "profile",
   targetRef: "",
   directionUi: "both",
+  dstHost: "",
   protocol: "any",
   dstPorts: "",
   action: "allow",
@@ -101,28 +102,42 @@ export const emptyCommRuleFormValues: HotspotCommRuleFormValues = {
 // Uma regra "dentro do perfil" é reconhecível por ter as duas pontas
 // no mesmo perfil - é assim que ela volta a abrir na modalidade certa.
 export function isWithinProfileRule(rule: HotspotCommRule): boolean {
-  return rule.sourceKind === "profile" && rule.targetKind === "profile" && rule.sourceRef === rule.targetRef;
+  return (
+    rule.zone === "clients" &&
+    rule.sourceKind === "profile" &&
+    rule.targetKind === "profile" &&
+    rule.sourceRef === rule.targetRef
+  );
 }
 
-export function commRuleToFormValues(rule: HotspotCommRule): HotspotCommRuleFormValues {
-  const base = {
+function l4Base(rule: HotspotCommRule) {
+  return {
     protocol: rule.protocol,
     dstPorts: rule.dstPorts ?? "",
     action: rule.action,
     enabled: rule.enabled,
     note: rule.note ?? "",
   };
-  if (isWithinProfileRule(rule)) {
+}
+
+export function commRuleToFormValues(rule: HotspotCommRule): HotspotCommRuleFormValues {
+  if (rule.zone !== "clients") {
     return {
       ...emptyCommRuleFormValues,
-      ...base,
-      scope: "within-profile",
-      profileRef: rule.sourceRef,
+      ...l4Base(rule),
+      zone: rule.zone,
+      sourceKind: rule.sourceKind,
+      sourceRef: rule.sourceRef,
+      dstHost: rule.dstHost ?? "",
     };
+  }
+  if (isWithinProfileRule(rule)) {
+    return { ...emptyCommRuleFormValues, ...l4Base(rule), zone: "clients", scope: "within-profile", profileRef: rule.sourceRef };
   }
   return {
     ...emptyCommRuleFormValues,
-    ...base,
+    ...l4Base(rule),
+    zone: "clients",
     scope: "endpoints",
     sourceKind: rule.sourceKind,
     sourceRef: rule.sourceRef,
@@ -133,45 +148,40 @@ export function commRuleToFormValues(rule: HotspotCommRule): HotspotCommRuleForm
 }
 
 export function formValuesToCommRule(values: HotspotCommRuleFormValues): HotspotCommRuleRequest {
-  // Campos comuns a todas as regras da Camada 1 (zona clients + L4). O
-  // backend zera dst_ports quando o protocolo não é tcp/udp.
   const common = {
-    zone: "clients" as const,
+    zone: values.zone,
     protocol: values.protocol,
     dstPorts: values.dstPorts.trim() ? values.dstPorts.trim() : null,
-    dstHost: null,
+    dstHost: values.zone === "wan" && values.dstHost.trim() ? values.dstHost.trim() : null,
     action: values.action,
     enabled: values.enabled,
     note: values.note.trim() ? values.note.trim() : null,
   };
 
-  if (values.scope === "within-profile") {
-    // Origem e destino no mesmo perfil, sempre bidirecional - controla a
-    // comunicação entre os clientes daquele perfil.
+  // Zonas wan/local: destino implicito (internet/gateway), sempre no
+  // sentido cliente -> destino.
+  if (values.zone !== "clients") {
     return {
       ...common,
-      sourceKind: "profile",
-      sourceRef: values.profileRef,
-      targetKind: "profile",
-      targetRef: values.profileRef,
-      direction: "both",
+      sourceKind: values.sourceKind,
+      sourceRef: values.sourceKind === "any" ? "" : values.sourceRef,
+      targetKind: "any",
+      targetRef: null,
+      direction: "to",
     };
+  }
+
+  if (values.scope === "within-profile") {
+    return { ...common, sourceKind: "profile", sourceRef: values.profileRef, targetKind: "profile", targetRef: values.profileRef, direction: "both" };
   }
 
   const direction = values.directionUi === "both" ? "both" : "to";
   if (values.targetKind === "any") {
-    return {
-      ...common,
-      sourceKind: values.sourceKind,
-      sourceRef: values.sourceRef,
-      targetKind: "any",
-      targetRef: null,
-      direction,
-    };
+    return { ...common, sourceKind: values.sourceKind, sourceRef: values.sourceRef, targetKind: "any", targetRef: null, direction };
   }
 
-  // "from" (destino → origem) é gravado trocando as pontas, já que o
-  // backend só conhece "to"/"both".
+  // "from" (destino → origem) é gravado trocando as pontas (o backend só
+  // conhece "to"/"both").
   const swapped = values.directionUi === "from";
   return {
     ...common,

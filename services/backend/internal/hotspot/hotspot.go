@@ -59,6 +59,7 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 			reapplyHotspotBlocklist(r.Context(), db, worker, iface)
 			reapplyHotspotShaping(r.Context(), worker, iface)
 			reapplyHotspotIsolation(r.Context(), db, worker)
+			reapplyHotspotFirewall(r.Context(), db, worker)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -88,6 +89,7 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 		reapplyHotspotBlocklist(r.Context(), db, worker, iface)
 		reapplyHotspotShaping(r.Context(), worker, iface)
 		reapplyHotspotIsolation(r.Context(), db, worker)
+		reapplyHotspotFirewall(r.Context(), db, worker)
 		if err := store.SetHotspotDesiredState(r.Context(), db, true); err != nil {
 			log.Printf("[backend] falha ao gravar estado desejado do hotspot (ligado): %v", err)
 		}
@@ -117,6 +119,10 @@ func RegisterHotspotRoutes(mux *http.ServeMux, worker *workerapi.Client, admin *
 			// sobreviver com o AP parado.
 			if err := teardownIsolationWorker(r.Context(), worker, iface); err != nil {
 				log.Printf("[backend] aviso: falha ao desmontar isolamento de clientes: %v", err)
+			}
+			// Idem para as zonas wan/local do firewall.
+			if err := teardownFirewallWorker(r.Context(), worker, iface); err != nil {
+				log.Printf("[backend] aviso: falha ao desmontar firewall (wan/local): %v", err)
 			}
 		}
 		if err := store.SetHotspotDesiredState(r.Context(), db, false); err != nil {

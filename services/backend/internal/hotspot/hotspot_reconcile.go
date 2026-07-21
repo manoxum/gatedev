@@ -76,6 +76,8 @@ func reconcileHotspotOnce(ctx context.Context, db *sql.DB, worker *workerapi.Cli
 	// que cobre cliente novo conectando, renovacao de DHCP e regra
 	// perdida por reinicio do container - tudo idempotente no worker.
 	applyIsolationLive(ctx, db, worker)
+	// Zonas wan/local do firewall: mesmo ciclo, tambem idempotentes.
+	applyFirewallLive(ctx, db, worker)
 	if err := applyAutomaticRecharges(db); err != nil {
 		log.Printf("[backend] recarga automatica de credito falhou: %v", err)
 	}

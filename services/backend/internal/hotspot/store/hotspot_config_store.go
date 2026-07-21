@@ -24,6 +24,8 @@ var hotspotConfigKeys = []string{
 	"BINDNET_UPLINK_INTERFACE",
 	"UPLINK_MONITOR_INTERVAL",
 	"CLIENT_ISOLATION",
+	"FW_WAN_POLICY",
+	"FW_LOCAL_POLICY",
 }
 
 var hotspotConfigDefaults = map[string]string{
@@ -41,6 +43,13 @@ var hotspotConfigDefaults = map[string]string{
 	// create_ap + chain BINDNET-ISOLATION no worker) - mudar exige
 	// reiniciar o hotspot, ver hotspot_isolation.go.
 	"CLIENT_ISOLATION": "false",
+	// Politica padrao das zonas wan (cliente->internet) e local
+	// (cliente->gateway) do firewall. Default 'allow' de proposito: com
+	// o firewall vazio nada muda (internet e painel seguem acessiveis) -
+	// so regras explicitas restringem. Aplicadas ao vivo, sem reiniciar
+	// o hotspot (ver hotspot_firewall_apply.go).
+	"FW_WAN_POLICY":   "allow",
+	"FW_LOCAL_POLICY": "allow",
 }
 
 // requiredHotspotRuntimeKeys nao inclui WIFI_PASSWORD: quando
@@ -119,6 +128,11 @@ func SaveHotspotConfig(ctx context.Context, db *sql.DB, values map[string]string
 	}
 	if isolation, ok := clean["CLIENT_ISOLATION"]; ok && isolation != "true" && isolation != "false" {
 		return errors.New("CLIENT_ISOLATION deve ser 'true' ou 'false'")
+	}
+	for _, key := range []string{"FW_WAN_POLICY", "FW_LOCAL_POLICY"} {
+		if policy, ok := clean[key]; ok && policy != "allow" && policy != "deny" {
+			return errors.New(key + " deve ser 'allow' ou 'deny'")
+		}
 	}
 	// A validacao de tamanho minimo so vale para hotspot com senha - um
 	// PATCH que liga WIFI_OPEN e WIFI_PASSWORD (vazio ou nao) na mesma

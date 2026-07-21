@@ -80,6 +80,7 @@ func startHotspotAndReapply(ctx context.Context, db *sql.DB, worker *workerapi.C
 	reapplyHotspotBlocklist(ctx, db, worker, iface)
 	reapplyHotspotShaping(ctx, worker, iface)
 	reapplyHotspotIsolation(ctx, db, worker)
+	reapplyHotspotFirewall(ctx, db, worker)
 	audit.Record(ctx, "hotspot_started", username, nil)
 	return nil
 }

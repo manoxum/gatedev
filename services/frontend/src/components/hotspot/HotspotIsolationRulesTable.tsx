@@ -32,6 +32,14 @@ function l4Summary(rule: HotspotCommRule): string {
   return rule.dstPorts ? `${proto} ${rule.dstPorts}` : proto;
 }
 
+// Destino legível conforme a zona: nas zonas wan/local o destino é
+// implícito (internet ou gateway); na zona clients é a outra ponta.
+function destinationText(rule: HotspotCommRule, endpointName: HotspotIsolationRulesTableProps["endpointName"]): string {
+  if (rule.zone === "wan") return rule.dstHost ? `Internet · ${rule.dstHost}` : "Internet";
+  if (rule.zone === "local") return "Painel/gateway";
+  return endpointText(endpointName, rule.targetKind, rule.targetRef);
+}
+
 // Tabela das regras de comunicação da aba Isolamento - só apresentação.
 // Regra "dentro de um perfil" (ambas as pontas no mesmo perfil) é
 // mostrada como uma linha própria; as demais mostram origem, sentido e
@@ -89,7 +97,7 @@ export function HotspotIsolationRulesTable({
                       <ArrowRight className="inline h-4 w-4 text-muted-foreground" aria-label="só origem para destino" />
                     )}
                   </TableCell>
-                  <TableCell>{endpointText(endpointName, rule.targetKind, rule.targetRef)}</TableCell>
+                  <TableCell>{destinationText(rule, endpointName)}</TableCell>
                 </>
               )}
               <TableCell>

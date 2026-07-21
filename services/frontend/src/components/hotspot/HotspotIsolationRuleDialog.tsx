@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { SelectNative } from "@/components/ui/select-native";
 import { HotspotRuleScopeToggle } from "@/components/hotspot/HotspotRuleScopeToggle";
 import { HotspotIsolationEndpointsFields } from "@/components/hotspot/HotspotIsolationEndpointsFields";
+import { HotspotFirewallZoneToggle } from "@/components/hotspot/HotspotFirewallZoneToggle";
+import { HotspotFirewallZoneFields } from "@/components/hotspot/HotspotFirewallZoneFields";
 import {
   hotspotCommRuleFormSchema,
   commRuleToFormValues,
@@ -56,6 +58,7 @@ export function HotspotIsolationRuleDialog({
     resolver: zodResolver(hotspotCommRuleFormSchema),
     values: rule ? commRuleToFormValues(rule) : emptyCommRuleFormValues,
   });
+  const zone = watch("zone");
   const scope = watch("scope");
   const sourceKind = watch("sourceKind");
   const targetKind = watch("targetKind");
@@ -73,39 +76,58 @@ export function HotspotIsolationRuleDialog({
         </DialogHeader>
         <form className="space-y-4" onSubmit={handleSubmit((values) => onSubmit(formValuesToCommRule(values)))}>
           <div className="space-y-2">
-            <Label>O que esta regra controla?</Label>
-            <HotspotRuleScopeToggle
-              value={scope}
-              onChange={(value) => setValue("scope", value, { shouldValidate: true })}
-            />
+            <Label>Zona da regra</Label>
+            <HotspotFirewallZoneToggle value={zone} onChange={(value) => setValue("zone", value, { shouldValidate: true })} />
           </div>
 
-          {scope === "within-profile" ? (
-            <div className="space-y-2">
-              <Label htmlFor="profileRef">Perfil</Label>
-              <SelectNative id="profileRef" {...register("profileRef")}>
-                <option value="">Escolha…</option>
-                {profileOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </SelectNative>
-              <p className="text-xs text-muted-foreground">
-                {watch("action") === "allow" ? "Permite" : "Bloqueia"} a comunicação entre os clientes deste perfil.
-              </p>
-              {errors.profileRef && <p className="text-sm text-destructive">{errors.profileRef.message}</p>}
-            </div>
-          ) : (
-            <HotspotIsolationEndpointsFields
+          {zone !== "clients" ? (
+            <HotspotFirewallZoneFields
               register={register}
               setValue={setValue}
               errors={errors}
+              zone={zone}
               sourceKind={sourceKind}
-              targetKind={targetKind}
               profileOptions={profileOptions}
               deviceOptions={deviceOptions}
             />
+          ) : scope === "within-profile" ? (
+            <>
+              <div className="space-y-2">
+                <Label>O que esta regra controla?</Label>
+                <HotspotRuleScopeToggle value={scope} onChange={(value) => setValue("scope", value, { shouldValidate: true })} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="profileRef">Perfil</Label>
+                <SelectNative id="profileRef" {...register("profileRef")}>
+                  <option value="">Escolha…</option>
+                  {profileOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </SelectNative>
+                <p className="text-xs text-muted-foreground">
+                  {watch("action") === "allow" ? "Permite" : "Bloqueia"} a comunicação entre os clientes deste perfil.
+                </p>
+                {errors.profileRef && <p className="text-sm text-destructive">{errors.profileRef.message}</p>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label>O que esta regra controla?</Label>
+                <HotspotRuleScopeToggle value={scope} onChange={(value) => setValue("scope", value, { shouldValidate: true })} />
+              </div>
+              <HotspotIsolationEndpointsFields
+                register={register}
+                setValue={setValue}
+                errors={errors}
+                sourceKind={sourceKind}
+                targetKind={targetKind}
+                profileOptions={profileOptions}
+                deviceOptions={deviceOptions}
+              />
+            </>
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">
